@@ -1,2 +1,3 @@
 # tinkv
-TinKV is a simple key-value storage engine written in Rust. Inspired by Bitcask storage, written after attending Talent Plan courses.
+
+[TinKV](https://github.com/iFaceless/tinkv) is a simple key-value storage engine written in Rust. Inspired by Bitcask storage, written after attending Talent Plan courses. Happy hacking~
