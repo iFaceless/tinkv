@@ -1,5 +1,4 @@
 //! A simple key-value store.
-use serde::{Serialize, Deserialize};
 
 #[derive(Debug)]
 pub struct Store {
