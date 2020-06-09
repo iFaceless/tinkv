@@ -1,7 +1,8 @@
 use tinkv::{self, TinkvStore};
 use std;
 fn main() -> tinkv::Result<()> {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-    println!("hello, rust");
+    let a = b"12345";
+    let b = b"345678";
+    
     Ok(())
 }

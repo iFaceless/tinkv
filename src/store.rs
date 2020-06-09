@@ -2,13 +2,13 @@
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug)]
-pub struct TinkvStore {
+pub struct Store {
 
 }
 
-impl TinkvStore {
+impl Store {
     pub fn new() -> Self { 
-        TinkvStore{}
+        Store{}
     }
 
     pub fn open() -> Self {
