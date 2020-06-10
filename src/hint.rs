@@ -10,3 +10,8 @@ struct Entry {
     position: u64,
     timestamp: u32,
 }
+
+#[derive(Debug)]
+pub(crate) struct File {
+
+}

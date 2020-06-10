@@ -1,4 +1,5 @@
 //! Data file implementation.
+use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 use crate::util::{current_timestamp, checksum};
 
@@ -33,6 +34,16 @@ impl Entry {
     fn is_valid(&self) -> bool {
         self.checksum == self.fresh_checksum()
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct File {
+    id: u64,
+    path: PathBuf,
+}
+
+impl File {
+
 }
 
 #[cfg(test)]

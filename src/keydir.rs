@@ -1,5 +1,6 @@
 //! Keydir is a in-memory hash table, which holds all the
 //! keys with corresponding values for fast lookup.
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy)]
 struct Entry {
@@ -8,8 +9,9 @@ struct Entry {
     timestamp: u32,
 }
 
-struct KeyDir {
-
+#[derive(Debug)]
+pub(crate) struct KeyDir {
+    index: BTreeMap<Vec<u8>, Entry>,
 }
 
 impl KeyDir {
