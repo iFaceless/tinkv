@@ -1,6 +1,9 @@
 //! Data file implementation.
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::io::prelude::*;
+use std::io::{BufReader, BufWriter};
 use serde::{Serialize, Deserialize};
+use crate::error::Result;
 use crate::util::{current_timestamp, checksum};
 
 /// Data entry definition.
@@ -42,8 +45,34 @@ pub(crate) struct File {
     path: PathBuf,
 }
 
-impl File {
 
+
+/// Manage data files.
+#[derive(Debug)]
+pub struct FileManager {
+    path: PathBuf,
+}
+
+impl FileManager {
+    pub fn new(path: &Path) -> Self {
+        FileManager {
+            path: path.to_path_buf(),
+        }
+    }
+
+    pub fn prepare(&mut self) -> Result<()> {
+        // scan immutable files.
+
+        // create new data file as current active file.
+
+        Ok(())
+    }
+
+    /// Get next available file id.
+    /// File id starts from 1.
+    fn next_file_id(&self) -> Result<u64> {
+        
+    }
 }
 
 #[cfg(test)]
