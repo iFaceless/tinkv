@@ -7,7 +7,9 @@ use crate::util::{current_timestamp, checksum};
 pub struct Entry {
     key: Vec<u8>,
     value: Vec<u8>,
+    // timestamp in seconds
     timestamp: u32,
+    // crc32 checksum
     checksum: u32,
 }
 
@@ -24,6 +26,7 @@ impl Entry {
     }
 
     fn fresh_checksum(&self) -> u32 {
+        // TODO: optimize it to avoid cloning.
         checksum(&[self.key.clone(), self.value.clone()].concat())
     }
 
