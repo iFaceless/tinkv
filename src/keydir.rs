@@ -14,6 +14,4 @@ pub(crate) struct KeyDir {
     index: BTreeMap<Vec<u8>, Entry>,
 }
 
-impl KeyDir {
-    
-}
+impl KeyDir {}

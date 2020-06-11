@@ -1,8 +1,12 @@
-use tinkv::{self, Store};
+use log;
+use pretty_env_logger;
 use std;
-fn main() -> tinkv::Result<()> {
-    let a = b"12345";
-    let b = b"345678";
+use std::path::Path;
+use tinkv::{self, util, Store};
 
+fn main() -> tinkv::Result<()> {
+    pretty_env_logger::init();
+    let mut store = Store::open(".tinkv")?;
+    store.set(b"key".to_vec(), b"value".to_vec())?;
     Ok(())
 }

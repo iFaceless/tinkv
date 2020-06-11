@@ -1,11 +1,11 @@
 //! A simple key-value store.
-mod error;
-mod store;
 mod config;
-mod util;
 mod data;
+mod error;
 mod hint;
 mod keydir;
+mod store;
+pub mod util;
 
-pub use error::{TinkvError, Result};
-pub use store::{Store};
+pub use error::{Result, TinkvError};
+pub use store::Store;

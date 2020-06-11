@@ -1,8 +1,8 @@
 //! Hint file implementation.
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-/// Entry in hint file, records file id, key, value position 
-/// and timestamp. 
+/// Entry in hint file, records file id, key, value position
+/// and timestamp.
 #[derive(Debug, Serialize, Deserialize)]
 struct Entry {
     key: Vec<u8>,
@@ -12,6 +12,4 @@ struct Entry {
 }
 
 #[derive(Debug)]
-pub(crate) struct File {
-
-}
+pub(crate) struct File {}

@@ -1,10 +1,10 @@
 //! Data file implementation.
-use std::path::{Path, PathBuf};
+use crate::error::Result;
+use crate::util::{checksum, current_timestamp};
+use serde::{Deserialize, Serialize};
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter};
-use serde::{Serialize, Deserialize};
-use crate::error::Result;
-use crate::util::{current_timestamp, checksum};
+use std::path::{Path, PathBuf};
 
 /// Data entry definition.
 #[derive(Serialize, Deserialize, Debug)]
@@ -45,62 +45,26 @@ pub(crate) struct File {
     path: PathBuf,
 }
 
-
-
-/// Manage data files.
-#[derive(Debug)]
-pub struct FileManager {
-    path: PathBuf,
-}
-
-impl FileManager {
-    pub fn new(path: &Path) -> Self {
-        FileManager {
-            path: path.to_path_buf(),
-        }
-    }
-
-    pub fn prepare(&mut self) -> Result<()> {
-        // scan immutable files.
-
-        // create new data file as current active file.
-
-        Ok(())
-    }
-
-    /// Get next available file id.
-    /// File id starts from 1.
-    fn next_file_id(&self) -> Result<u64> {
-        
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_new_entry() {
-        let ent = Entry::new(
-            b"key".to_vec(), 
-            b"value".to_vec());
+        let ent = Entry::new(b"key".to_vec(), b"value".to_vec());
         assert_eq!(ent.timestamp <= current_timestamp(), true);
         assert_eq!(ent.checksum, 3327521766);
     }
 
     #[test]
     fn test_checksum_valid() {
-        let ent = Entry::new(
-            b"key".to_vec(), 
-            b"value".to_vec());
+        let ent = Entry::new(b"key".to_vec(), b"value".to_vec());
         assert_eq!(ent.is_valid(), true);
     }
 
     #[test]
     fn test_checksum_invalid() {
-        let mut ent = Entry::new(
-            b"key".to_vec(), 
-            b"value".to_vec());
+        let mut ent = Entry::new(b"key".to_vec(), b"value".to_vec());
         ent.value = b"value_changed".to_vec();
         assert_eq!(ent.is_valid(), false);
     }
