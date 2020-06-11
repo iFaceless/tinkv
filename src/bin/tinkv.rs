@@ -1,8 +1,8 @@
-use log;
+
 use pretty_env_logger;
-use std;
-use std::path::Path;
-use tinkv::{self, util, Store};
+
+
+use tinkv::{self, Store};
 
 fn main() -> tinkv::Result<()> {
     pretty_env_logger::init();

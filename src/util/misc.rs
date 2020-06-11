@@ -2,7 +2,7 @@
 use chrono;
 use crc;
 use std::io::prelude::*;
-use std::io::{self, BufReader, BufWriter, SeekFrom};
+
 use std::path::Path;
 
 pub fn current_timestamp() -> u32 {

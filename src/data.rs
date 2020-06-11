@@ -1,27 +1,27 @@
 //! Data file implementation.
-use crate::error::Result;
+
 use crate::util::{checksum, current_timestamp};
 use serde::{Deserialize, Serialize};
-use std::io::prelude::*;
-use std::io::{BufReader, BufWriter};
-use std::path::{Path, PathBuf};
+
+
+use std::path::{PathBuf};
 
 /// Data entry definition.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Entry {
-    key: Vec<u8>,
-    value: Vec<u8>,
+    pub key: Vec<u8>,
+    pub value: Vec<u8>,
     // timestamp in seconds
-    timestamp: u32,
+    pub timestamp: u32,
     // crc32 checksum
-    checksum: u32,
+    pub checksum: u32,
 }
 
 impl Entry {
-    fn new(key: Vec<u8>, value: Vec<u8>) -> Self {
+    pub fn new(key: &[u8], value: &[u8]) -> Self {
         let mut ent = Entry {
-            key: key,
-            value: value,
+            key: key.into(),
+            value: value.into(),
             timestamp: current_timestamp(),
             checksum: 0,
         };
@@ -51,14 +51,14 @@ mod tests {
 
     #[test]
     fn test_new_entry() {
-        let ent = Entry::new(b"key".to_vec(), b"value".to_vec());
+        let ent = Entry::new(&b"key".to_vec(), &b"value".to_vec());
         assert_eq!(ent.timestamp <= current_timestamp(), true);
         assert_eq!(ent.checksum, 3327521766);
     }
 
     #[test]
     fn test_checksum_valid() {
-        let ent = Entry::new(b"key".to_vec(), b"value".to_vec());
+        let ent = Entry::new(&b"key".to_vec(), &b"value".to_vec());
         assert_eq!(ent.is_valid(), true);
     }
 
