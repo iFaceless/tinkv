@@ -4,17 +4,13 @@ use crate::error::Result;
 use crate::{
     data::SegmentFile,
     keydir::KeyDir,
-    util::{self, BufReaderWithOffset, BufWriterWithOffset},
+    util::{self},
 };
 use glob::glob;
 use log::{info, trace};
 use std::collections::HashMap;
-use std::fs::{self, File};
-use std::io::prelude::*;
+use std::fs::create_dir_all;
 
-use anyhow::anyhow;
-use bincode;
-use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -29,13 +25,13 @@ pub struct Store {
 impl Store {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Store> {
         info!("[store] open store path: {}", path.as_ref().display());
-        fs::create_dir_all(&path)?;
+        create_dir_all(&path)?;
 
         let mut store = Store {
             path: path.as_ref().to_path_buf(),
             segments: HashMap::new(),
             active_segment: None,
-            key_dir: KeyDir::new(),
+            key_dir: KeyDir::new(path.as_ref()),
         };
 
         store.open_segments()?;
@@ -81,7 +77,7 @@ impl Store {
         let offset = segment.write(key, value, timestamp)?;
 
         // Update key dir, the in-memory index.
-        self.key_dir.insert(key, segment.id, offset, timestamp);
+        self.key_dir.set(key, segment.id, offset, timestamp);
 
         Ok(())
     }
