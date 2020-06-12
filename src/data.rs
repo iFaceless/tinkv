@@ -1,10 +1,13 @@
 //! Data file implementation.
-
-use crate::util::{checksum, current_timestamp};
+use crate::error::Result;
+use crate::util::{checksum, parse_file_id, BufReaderWithOffset, BufWriterWithOffset};
+use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-
-use std::path::{PathBuf};
+use std::fs::{self, File};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use log::{trace};
 
 /// Data entry definition.
 #[derive(Serialize, Deserialize, Debug)]
@@ -14,15 +17,15 @@ pub struct Entry {
     // timestamp in seconds
     pub timestamp: u32,
     // crc32 checksum
-    pub checksum: u32,
+    checksum: u32,
 }
 
 impl Entry {
-    pub fn new(key: &[u8], value: &[u8]) -> Self {
+    fn new(key: &[u8], value: &[u8], timestamp: u32) -> Self {
         let mut ent = Entry {
             key: key.into(),
             value: value.into(),
-            timestamp: current_timestamp(),
+            timestamp,
             checksum: 0,
         };
         ent.checksum = ent.fresh_checksum();
@@ -39,32 +42,89 @@ impl Entry {
     }
 }
 
+/// SegmentFile represents a immutable or immutalbe data log file.
 #[derive(Debug)]
-pub(crate) struct File {
-    id: u64,
-    path: PathBuf,
+pub(crate) struct SegmentFile {
+    pub path: PathBuf,
+    /// Segment file id (12 digital characters).
+    pub id: u64,
+    /// Only one segment can be writeable at any time.
+    /// Mark current segment file can be writeable or not.
+    writeable: bool,
+    /// File handle of current segment file for writting.
+    /// Only writeable file can hold a writer.
+    writer: Option<BufWriterWithOffset<File>>,
+    /// File handle of current segment file for reading.
+    reader: BufReaderWithOffset<File>,
+}
+
+impl SegmentFile {
+    /// Create a new segment file instance.
+    /// It parses segment id from file path, which wraps an optional
+    /// writer (only for writeable segement file) and reader.
+    pub(crate) fn new(path: &Path, writeable: bool) -> Result<Self> {
+        // Segment name must starts with valid file id.
+        let file_id = parse_file_id(path).expect("file id not found in file path");
+        let mut df = SegmentFile {
+            path: path.to_path_buf(),
+            id: file_id,
+            writeable,
+            reader: BufReaderWithOffset::new(fs::File::open(path)?)?,
+            writer: None,
+        };
+
+        if writeable {
+            let w = BufWriterWithOffset::new(
+                fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .append(true)
+                    .open(path)?,
+            )?;
+            df.writer = Some(w);
+        }
+
+        Ok(df)
+    }
+
+    /// Save key-value pair to segement file.
+    pub(crate) fn write(&mut self, key: &[u8], value: &[u8], timestamp: u32) -> Result<u64> {
+        let ent = Entry::new(key, value, timestamp);
+        trace!("[data] append entry {:?} to segement {}", &ent, self.path.display());
+        let encoded = bincode::serialize(&ent)?;
+        let w = self
+            .writer
+            .as_mut()
+            .ok_or(anyhow!("segment file is not writeable"))?;
+        w.write(&encoded)?;
+        Ok(w.offset())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::*;
 
     #[test]
     fn test_new_entry() {
-        let ent = Entry::new(&b"key".to_vec(), &b"value".to_vec());
+        let ts = current_timestamp();
+        let ent = Entry::new(&b"key".to_vec(), &b"value".to_vec(), ts);
         assert_eq!(ent.timestamp <= current_timestamp(), true);
         assert_eq!(ent.checksum, 3327521766);
     }
 
     #[test]
     fn test_checksum_valid() {
-        let ent = Entry::new(&b"key".to_vec(), &b"value".to_vec());
+        let ts = current_timestamp();
+        let ent = Entry::new(&b"key".to_vec(), &b"value".to_vec(), ts);
         assert_eq!(ent.is_valid(), true);
     }
 
     #[test]
     fn test_checksum_invalid() {
-        let mut ent = Entry::new(b"key".to_vec(), b"value".to_vec());
+        let ts = current_timestamp();
+        let mut ent = Entry::new(&b"key".to_vec(), &b"value".to_vec(), ts);
         ent.value = b"value_changed".to_vec();
         assert_eq!(ent.is_valid(), false);
     }

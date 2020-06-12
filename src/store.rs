@@ -2,43 +2,87 @@
 use crate::config;
 use crate::error::Result;
 use crate::{
+    data::SegmentFile,
+    keydir::KeyDir,
     util::{self, BufReaderWithOffset, BufWriterWithOffset},
-    keydir::{KeyDir},
-    data,
 };
 use glob::glob;
-use log::{debug};
+use log::{info, trace};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::prelude::*;
 
-use std::path::{Path, PathBuf};
-use serde::{Serialize};
+use anyhow::anyhow;
 use bincode;
+use serde::Serialize;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub struct Store {
-    // directory for log file and hint file.
+    // directory for database.
     path: PathBuf,
-    file_manager: FileManager,
+    segments: HashMap<u64, SegmentFile>,
+    active_segment: Option<SegmentFile>,
     key_dir: KeyDir,
 }
 
 impl Store {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Store> {
+        info!("[store] open store path: {}", path.as_ref().display());
         fs::create_dir_all(&path)?;
-        let file_manager = FileManager::new(&path.as_ref())?;
-        Ok(Self {
+
+        let mut store = Store {
             path: path.as_ref().to_path_buf(),
-            file_manager: file_manager,
+            segments: HashMap::new(),
+            active_segment: None,
             key_dir: KeyDir::new(),
-        })
+        };
+
+        store.open_segments()?;
+        store.new_segment_file()?;
+
+        Ok(store)
     }
 
+    /// Open segment files (they are immutable).
+    fn open_segments(&mut self) -> Result<()> {
+        let pattern = format!("{}/*{}", self.path.display(), config::DATA_FILE_SUFFIX);
+        trace!("[store] read segment files with pattern: {}", &pattern);
+        for path in glob(&pattern)? {
+            let segment = SegmentFile::new(path?.as_path(), false)?;
+            self.segments.insert(segment.id, segment);
+        }
+        trace!("[store] got {} segment files", self.segments.len());
+        Ok(())
+    }
+
+    fn new_segment_file(&mut self) -> Result<()> {
+        // Get new data file id.
+        let max_file_id: &u64 = self.segments.keys().max().unwrap_or(&0);
+        let next_file_id: u64 = max_file_id + 1;
+
+        // Build data file path.
+        let filename = format!("{:012}{}", next_file_id, config::DATA_FILE_SUFFIX);
+        let mut p = self.path.clone();
+        p.push(filename);
+
+        trace!("[store] new segment data file at: {}", &p.display());
+        self.active_segment = Some(SegmentFile::new(p.as_path(), true)?);
+        Ok(())
+    }
+
+    /// Save key & value pair to database.
     pub fn set(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
-        let mut df = self.file_manager.active_data_file.unwrap();
-        let (offset, entry) = df.set(key, value)?;
-        self.key_dir.set(key, df.file_id().unwrap(), offset, entry.timestamp);
+        // We'are sure that active data file has been prepared.
+        let segment = self.active_segment.as_mut().unwrap();
+        let timestamp = util::current_timestamp();
+
+        // Save data to data log file.
+        let offset = segment.write(key, value, timestamp)?;
+
+        // Update key dir, the in-memory index.
+        self.key_dir.insert(key, segment.id, offset, timestamp);
+
         Ok(())
     }
 
@@ -52,112 +96,5 @@ impl Store {
 
     pub fn compact(&mut self) -> Result<()> {
         Ok(())
-    }
-}
-
-#[derive(Debug)]
-struct DataFile {
-    path: PathBuf,
-    writeable: bool,
-    reader: BufReaderWithOffset<File>,
-    writer: Option<Box<BufWriterWithOffset<File>>>,
-}
-
-impl DataFile {
-    fn new(path: &Path, writeable: bool) -> Result<Self> {
-        let mut df = DataFile {
-            path: path.to_path_buf(),
-            writeable: writeable,
-            reader: BufReaderWithOffset::new(fs::File::open(path)?)?,
-            writer: None,
-        };
-
-        if writeable {
-            let w = BufWriterWithOffset::new(
-                fs::OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .append(true)
-                    .open(path)?,
-            )?;
-            df.writer = Some(Box::new(w))
-        }
-        Ok(df)
-    }
-
-    fn file_id(&self) -> Option<u64> {
-        util::parse_file_id(self.path.as_path())
-    }
-
-    fn set(&mut self, key: &[u8], value: &[u8]) -> Result<(u64, data::Entry)> {
-        let ent = data::Entry::new(key, value);
-        let encoded = bincode::serialize(&ent)?;
-        let mut w = self.writer.unwrap();
-        w.write(&encoded)?;
-        Ok((w.offset(), ent))
-    }
-}
-
-#[derive(Debug)]
-struct FileManager {
-    path: PathBuf,
-    active_data_file: Option<DataFile>,
-    data_files: HashMap<u64, DataFile>,
-}
-
-impl FileManager {
-    fn new(path: &Path) -> Result<FileManager> {
-        let mut fm = FileManager {
-            path: path.to_path_buf(),
-            active_data_file: None,
-            data_files: HashMap::new(),
-        };
-        fm.new_active_data_file()?;
-        fm.open_data_files()?;
-        Ok(fm)
-    }
-
-    fn new_active_data_file(&mut self) -> Result<()> {
-        let p = self.next_data_file_path()?;
-        debug!("new active data file at: {}", &p.display());
-        self.active_data_file = Some(DataFile::new(p.as_path(), true)?);
-        Ok(())
-    }
-
-    fn open_data_files(&mut self) -> Result<()> {
-        for path in self.list_data_files()? {
-            let df = DataFile::new(path.as_path(), false)?;
-            // TODO: whatif parsing file id failed?
-            self.data_files.insert(df.file_id().unwrap(), df);
-        }
-        Ok(())
-    }
-
-    fn next_data_file_path(&self) -> Result<PathBuf> {
-        let file_id = self.next_file_id()?;
-        let filename = format!("{:012}{}", file_id, config::DATA_FILE_SUFFIX);
-        let mut p = self.path.clone();
-        p.push(filename);
-        Ok(p)
-    }
-
-    fn next_file_id(&self) -> Result<u64> {
-        // Collect file ids.
-        let max_file_id: u64 = self
-            .list_data_files()?
-            .iter()
-            .map(|path| util::parse_file_id(path.as_path()).unwrap_or(0))
-            .max()
-            .unwrap_or(0);
-        Ok(max_file_id + 1)
-    }
-
-    fn list_data_files(&self) -> Result<Vec<PathBuf>> {
-        let pattern = format!("{}/*{}", self.path.display(), config::DATA_FILE_SUFFIX);
-        let mut filenames = vec![];
-        for path in glob(&pattern)? {
-            filenames.push(path?);
-        }
-        Ok(filenames)
     }
 }

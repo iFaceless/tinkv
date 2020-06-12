@@ -22,7 +22,7 @@ impl KeyDir {
         }
     }
 
-    pub fn set(&mut self, key: &[u8], file_id: u64, offset: u64, timestamp: u32) {
+    pub fn insert(&mut self, key: &[u8], file_id: u64, offset: u64, timestamp: u32) {
         self.index.insert(key.into(), Entry {
             file_id,
             offset,
