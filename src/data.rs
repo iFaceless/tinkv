@@ -1,4 +1,4 @@
-//! Data file implementation.
+//! Segment file implementation.
 use crate::error::Result;
 use crate::util::{checksum, parse_file_id, BufReaderWithOffset, BufWriterWithOffset};
 use anyhow::anyhow;
@@ -65,32 +65,33 @@ impl SegmentFile {
     pub(crate) fn new(path: &Path, writeable: bool) -> Result<Self> {
         // Segment name must starts with valid file id.
         let file_id = parse_file_id(path).expect("file id not found in file path");
-        let mut df = SegmentFile {
-            path: path.to_path_buf(),
-            id: file_id,
-            writeable,
-            reader: BufReaderWithOffset::new(fs::File::open(path)?)?,
-            writer: None,
-        };
 
+        let mut w = None;
         if writeable {
-            let w = BufWriterWithOffset::new(
+            w = Some(BufWriterWithOffset::new(
                 fs::OpenOptions::new()
                     .create(true)
                     .write(true)
                     .append(true)
                     .open(path)?,
-            )?;
-            df.writer = Some(w);
+            )?);
         }
 
-        Ok(df)
+        let sf = SegmentFile {
+            path: path.to_path_buf(),
+            id: file_id,
+            writeable,
+            reader: BufReaderWithOffset::new(fs::File::open(path)?)?,
+            writer: w,
+        };
+
+        Ok(sf)
     }
 
     /// Save key-value pair to segement file.
     pub(crate) fn write(&mut self, key: &[u8], value: &[u8], timestamp: u32) -> Result<u64> {
         let ent = Entry::new(key, value, timestamp);
-        trace!("[data] append entry {:?} to segement {}", &ent, self.path.display());
+        trace!("append entry {:?} to segement {}", &ent, self.path.display());
         let encoded = bincode::serialize(&ent)?;
         let w = self
             .writer

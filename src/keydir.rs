@@ -30,7 +30,7 @@ impl KeyDir {
             timestamp,
         };
 
-        trace!("[keydir] set {} => {:?}", String::from_utf8_lossy(key), &ent);
+        trace!("set {} => {:?}", String::from_utf8_lossy(key), &ent);
         self.index.insert(key.into(), ent);
     }
 }

@@ -4,7 +4,7 @@ use crate::error::Result;
 use crate::{
     data::SegmentFile,
     keydir::KeyDir,
-    util::{self},
+    util,
 };
 use glob::glob;
 use log::{info, trace};
@@ -24,7 +24,7 @@ pub struct Store {
 
 impl Store {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Store> {
-        info!("[store] open store path: {}", path.as_ref().display());
+        info!("open store path: {}", path.as_ref().display());
         create_dir_all(&path)?;
 
         let mut store = Store {
@@ -43,12 +43,12 @@ impl Store {
     /// Open segment files (they are immutable).
     fn open_segments(&mut self) -> Result<()> {
         let pattern = format!("{}/*{}", self.path.display(), config::DATA_FILE_SUFFIX);
-        trace!("[store] read segment files with pattern: {}", &pattern);
+        trace!("read segment files with pattern: {}", &pattern);
         for path in glob(&pattern)? {
             let segment = SegmentFile::new(path?.as_path(), false)?;
             self.segments.insert(segment.id, segment);
         }
-        trace!("[store] got {} segment files", self.segments.len());
+        trace!("got {} segment files", self.segments.len());
         Ok(())
     }
 
@@ -62,7 +62,7 @@ impl Store {
         let mut p = self.path.clone();
         p.push(filename);
 
-        trace!("[store] new segment data file at: {}", &p.display());
+        trace!("new segment data file at: {}", &p.display());
         self.active_segment = Some(SegmentFile::new(p.as_path(), true)?);
         Ok(())
     }
