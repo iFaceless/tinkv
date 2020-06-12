@@ -33,7 +33,7 @@ impl Store {
             active_segment: None,
             key_dir: KeyDir::new(path.as_ref()),
         };
-
+        
         store.open_segments()?;
         store.new_segment_file()?;
 
