@@ -59,8 +59,8 @@ impl Store {
 struct DataFile {
     path: PathBuf,
     writeable: bool,
-    reader: Option<BufReaderWithOffset<File>>,
-    writer: Option<BufWriterWithOffset<File>>,
+    reader: BufReaderWithOffset<File>,
+    writer: Option<Box<BufWriterWithOffset<File>>>,
 }
 
 impl DataFile {
@@ -68,11 +68,10 @@ impl DataFile {
         let mut df = DataFile {
             path: path.to_path_buf(),
             writeable: writeable,
-            reader: None,
+            reader: BufReaderWithOffset::new(fs::File::open(path)?)?,
             writer: None,
         };
 
-        df.reader = Some(BufReaderWithOffset::new(fs::File::open(path)?)?);
         if writeable {
             let w = BufWriterWithOffset::new(
                 fs::OpenOptions::new()
@@ -81,7 +80,7 @@ impl DataFile {
                     .append(true)
                     .open(path)?,
             )?;
-            df.writer = Some(w)
+            df.writer = Some(Box::new(w))
         }
         Ok(df)
     }
