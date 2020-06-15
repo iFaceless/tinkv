@@ -1,5 +1,5 @@
 //! Segment file implementation.
-use crate::config;
+
 use crate::error::Result;
 use crate::util::{checksum, parse_file_id, BufReaderWithOffset, BufWriterWithOffset};
 use anyhow::anyhow;
@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use log::trace;
 use std::fs::{self, File};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+
 
 /// Data entry definition.
 #[derive(Serialize, Deserialize, Debug)]
