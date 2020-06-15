@@ -5,11 +5,10 @@ use crate::util::{checksum, parse_file_id, BufReaderWithOffset, BufWriterWithOff
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-use log::trace;
+use log::{trace};
 use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-
 
 /// Data entry definition.
 #[derive(Serialize, Deserialize, Debug)]
@@ -58,6 +57,8 @@ pub(crate) struct SegmentFile {
     writer: Option<BufWriterWithOffset<File>>,
     /// File handle of current segment file for reading.
     reader: BufReaderWithOffset<File>,
+    /// Segment file size.
+    size: u64,
 }
 
 impl SegmentFile {
@@ -79,12 +80,15 @@ impl SegmentFile {
             )?);
         }
 
+        let file = fs::File::open(path)?;
+        let size = file.metadata()?.len();
         let sf = SegmentFile {
             path: path.to_path_buf(),
             id: file_id,
             writeable,
-            reader: BufReaderWithOffset::new(fs::File::open(path)?)?,
+            reader: BufReaderWithOffset::new(file)?,
             writer: w,
+            size: size,
         };
 
         Ok(sf)
@@ -107,6 +111,8 @@ impl SegmentFile {
         w.write(&encoded)?;
         // TODO: custom flushing strategies.
         w.flush()?;
+
+        self.size = offset + encoded.len() as u64;
         Ok(offset)
     }
 
@@ -127,6 +133,18 @@ impl SegmentFile {
     pub(crate) fn iter(&self) -> SegmentEntryIter {
         SegmentEntryIter {
             reader: fs::File::open(self.path.clone()).unwrap(),
+        }
+    }
+}
+
+impl Drop for SegmentFile {
+    fn drop(&mut self) {
+        // auto clean up if file size is zero.
+        if self.writeable && self.size == 0 && fs::remove_file(self.path.as_path()).is_ok() {
+            trace!(
+                "segment file '{}' is empty, remove it.",
+                self.path.display()
+            );
         }
     }
 }

@@ -77,15 +77,17 @@ impl Store {
                 if ent.value == config::REMOVE_TOMESTONE {
                     self.key_dir.remove(&ent.key);
                 }
-                
+
                 let existed = self.key_dir.get(&ent.key);
                 match existed {
                     None => {
-                        self.key_dir.set(&ent.key, segment.id, offset, ent.timestamp);
-                    },
+                        self.key_dir
+                            .set(&ent.key, segment.id, offset, ent.timestamp);
+                    }
                     Some(existed_ent) => {
                         if existed_ent.timestamp < ent.timestamp {
-                            self.key_dir.set(&ent.key, segment.id, offset, ent.timestamp);
+                            self.key_dir
+                                .set(&ent.key, segment.id, offset, ent.timestamp);
                         }
                     }
                 }
@@ -183,6 +185,11 @@ impl Store {
     /// Clear staled entries from segment files.
     /// Merge segment files.
     pub fn compact(&mut self) -> Result<()> {
+        self.remove_staled_files()?;
+        Ok(())
+    }
+
+    fn remove_staled_files(&mut self) -> Result<()> {
         Ok(())
     }
 }
