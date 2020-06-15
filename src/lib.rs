@@ -1,6 +1,6 @@
 //! A simple key-value store.
 mod config;
-mod data;
+mod log;
 mod error;
 mod hint;
 mod keydir;

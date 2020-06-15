@@ -4,10 +4,11 @@ use crate::util::{checksum, parse_file_id, BufReaderWithOffset, BufWriterWithOff
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
+use log::trace;
 use std::fs::{self, File};
-use std::io::{Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use log::{trace};
+use std::rc::Rc;
 
 /// Data entry definition.
 #[derive(Serialize, Deserialize, Debug)]
@@ -37,9 +38,15 @@ impl Entry {
         checksum(&[self.key.clone(), self.value.clone()].concat())
     }
 
-    fn is_valid(&self) -> bool {
+    pub(crate) fn is_valid(&self) -> bool {
         self.checksum == self.fresh_checksum()
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct WriteResponse {
+    pub offset: u64,
+    pub len: u64,
 }
 
 /// SegmentFile represents a immutable or immutalbe data log file.
@@ -91,14 +98,35 @@ impl SegmentFile {
     /// Save key-value pair to segement file.
     pub(crate) fn write(&mut self, key: &[u8], value: &[u8], timestamp: u32) -> Result<u64> {
         let ent = Entry::new(key, value, timestamp);
-        trace!("append entry {:?} to segement {}", &ent, self.path.display());
+        trace!(
+            "append entry {:?} to segement {}",
+            &ent,
+            self.path.display()
+        );
         let encoded = bincode::serialize(&ent)?;
         let w = self
             .writer
             .as_mut()
             .ok_or(anyhow!("segment file is not writeable"))?;
+        let offset = w.offset();
         w.write(&encoded)?;
-        Ok(w.offset())
+        // TODO: custom flushing strategies.
+        w.flush()?;
+        Ok(offset)
+    }
+
+    /// Read key value in segment file.
+    pub(crate) fn read(&mut self, offset: u64) -> Result<Entry> {
+        trace!(
+            "read key value with offset {} in file {}",
+            offset,
+            self.path.display()
+        );
+        // Note: we have to get a mutable reader here.
+        let reader = &mut self.reader;
+        reader.seek(SeekFrom::Start(offset))?;
+        let ent: Entry = bincode::deserialize_from(reader)?;
+        Ok(ent)
     }
 }
 
