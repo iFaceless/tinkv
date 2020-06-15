@@ -2,7 +2,7 @@
 //! keys with corresponding values for fast lookup.
 use log::trace;
 use std::collections::BTreeMap;
-use std::path::{Path};
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Entry {
@@ -44,5 +44,9 @@ impl KeyDir {
 
     pub(crate) fn contains_key(&self, key: &[u8]) -> bool {
         self.index.contains_key(key)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.index.len()
     }
 }

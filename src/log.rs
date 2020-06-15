@@ -1,4 +1,5 @@
 //! Segment file implementation.
+use crate::config;
 use crate::error::Result;
 use crate::util::{checksum, parse_file_id, BufReaderWithOffset, BufWriterWithOffset};
 use anyhow::anyhow;
@@ -41,12 +42,6 @@ impl Entry {
     pub(crate) fn is_valid(&self) -> bool {
         self.checksum == self.fresh_checksum()
     }
-}
-
-#[derive(Debug)]
-pub(crate) struct WriteResponse {
-    pub offset: u64,
-    pub len: u64,
 }
 
 /// SegmentFile represents a immutable or immutalbe data log file.
@@ -127,6 +122,27 @@ impl SegmentFile {
         reader.seek(SeekFrom::Start(offset))?;
         let ent: Entry = bincode::deserialize_from(reader)?;
         Ok(ent)
+    }
+
+    pub(crate) fn iter(&self) -> SegmentEntryIter {
+        SegmentEntryIter {
+            reader: fs::File::open(self.path.clone()).unwrap(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct SegmentEntryIter {
+    reader: fs::File,
+}
+
+impl Iterator for SegmentEntryIter {
+    type Item = (u64, Entry);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let offset = self.reader.seek(SeekFrom::Current(0)).unwrap();
+        let ent: Entry = bincode::deserialize_from(&self.reader).ok()?;
+        Some((offset, ent))
     }
 }
 

@@ -5,9 +5,17 @@ use tinkv::{self, Store};
 fn main() -> tinkv::Result<()> {
     pretty_env_logger::init();
     let mut store = Store::open(".tinkv")?;
-    store.set(&b"key".to_vec(), &b"value".to_vec())?;
-    store.set(&b"key".to_vec(), &b"value new".to_vec())?;
-    let value = store.get(&b"key".to_vec())?;
+    
+    // for key in vec!["a", "b", "c", "d", "e"] {
+    //     store.set(key.as_bytes(), key.as_bytes())?;
+    // }
+    // store.set("b".as_bytes(), "new_b".as_bytes())?;
+    // store.remove("d".as_bytes())?;
+
+    let value = store.get("b".as_bytes())?;
     println!("{:?}", String::from_utf8_lossy(&value.unwrap()));
+
+    let value = store.get("d".as_bytes())?;
+    println!("{:?}", value);
     Ok(())
 }
