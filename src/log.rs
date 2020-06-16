@@ -11,6 +11,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 /// Data entry definition.
+/// It will be serialized and saved to segment file.
 #[derive(Serialize, Deserialize, Debug)]
 struct InnerEntry {
     key: Vec<u8>,
@@ -46,6 +47,7 @@ impl InnerEntry {
     }
 }
 
+/// An entry wrapper with size and offset.
 #[derive(Debug)]
 pub(crate) struct Entry {
     inner: InnerEntry,
@@ -56,6 +58,7 @@ pub(crate) struct Entry {
 }
 
 impl Entry {
+    /// Create a new entry instance with size and offset.
     fn new(inner: InnerEntry, size: u64, offset: u64) -> Self {
         Self {
             inner,
@@ -64,18 +67,22 @@ impl Entry {
         }
     }
 
+    /// Check the inner data entry is corrupted or not.
     pub(crate) fn is_valid(&self) -> bool {
         self.inner.is_valid()
     }
 
+    /// Return key of the inner entry.
     pub(crate) fn key(&self) -> &[u8] {
         &self.inner.key
     }
 
+    /// Return value of the inner entry.
     pub(crate) fn value(&self) -> &[u8] {
         &self.inner.value
     }
 
+    /// Return timestamp of the inner entry.
     pub(crate) fn timestamp(&self) -> u128 {
         self.inner.timestamp
     }

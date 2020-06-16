@@ -3,7 +3,7 @@ use crate::config;
 use crate::error::Result;
 use crate::{log::SegmentFile, util};
 use glob::glob;
-use log::{info, trace};
+use log::{debug, info, trace};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::create_dir_all;
 
@@ -76,7 +76,7 @@ impl Store {
 
         for segment_id in segment_ids {
             let segment = self.segments.get(segment_id).unwrap();
-            trace!("build key dir from segment file {}", segment.path.display());
+            debug!("build key dir from segment file {}", segment.path.display());
             for entry in segment.entry_iter() {
                 if !entry.is_valid() {
                     return Err(anyhow!("data entry was corrupted, current key is '{}', segment file id {}, offset {}", String::from_utf8_lossy(entry.key()), segment.id, entry.offset));
@@ -84,17 +84,26 @@ impl Store {
 
                 if entry.value() == config::REMOVE_TOMESTONE {
                     self.stats.total_stale_entries += 1;
+                    self.stats.size_of_stale_entries += entry.size;
                     self.stats.total_active_entries -= 1;
 
-                    self.keydir.remove(entry.key());
+                    if let Some(old_ent) = self.keydir.remove(entry.key()) {
+                        self.stats.size_of_stale_entries += old_ent.size;
+                        self.stats.total_stale_entries += 1;
+                    }
                 }
 
-                let keydir_ent =
-                    KeyDirEntry::new(segment_id.clone(), entry.offset, entry.size, entry.timestamp());
+                let keydir_ent = KeyDirEntry::new(
+                    segment_id.clone(),
+                    entry.offset,
+                    entry.size,
+                    entry.timestamp(),
+                );
                 let existed = self.keydir.get(entry.key());
                 match existed {
                     None => {
                         self.keydir.insert(entry.key().into(), keydir_ent);
+                        self.stats.total_active_entries += 1;
                     }
                     Some(existed_ent) => {
                         if existed_ent.timestamp < entry.timestamp() {
@@ -102,10 +111,13 @@ impl Store {
                         }
                     }
                 }
-                self.stats.total_active_entries += 1;
             }
         }
-        info!("build keydir done, got {} keys", self.keydir.len());
+        info!(
+            "build keydir done, got {} keys. current stats: {:?}",
+            self.keydir.len(),
+            self.stats
+        );
         Ok(())
     }
 
@@ -143,11 +155,16 @@ impl Store {
         let ent = segment.write(key, value, timestamp)?;
 
         // Update key dir, the in-memory index.
-        self.keydir.insert(
+        let old = self.keydir.insert(
             key.to_vec(),
             KeyDirEntry::new(segment.id, ent.offset, ent.size, timestamp),
         );
 
+        if old.is_none() {
+            self.stats.total_active_entries += 1;
+        }
+
+        self.stats.size_of_all_segment_files += ent.size;
         Ok(())
     }
 
@@ -187,9 +204,15 @@ impl Store {
                 .expect("active segment not found");
             let timestamp = util::current_timestamp();
             // Write tomestone, will be removed on compaction.
-            segment.write(key, config::REMOVE_TOMESTONE, timestamp)?;
+            let entry = segment.write(key, config::REMOVE_TOMESTONE, timestamp)?;
             // Remove key from in-memory index.
-            self.keydir.remove(key).expect("key not found");
+            let old = self.keydir.remove(key).expect("key not found");
+
+            self.stats.total_active_entries -= 1;
+            self.stats.total_stale_entries += 1;
+            self.stats.size_of_all_segment_files += entry.size;
+            self.stats.size_of_stale_entries += old.size + entry.size;
+
             Ok(())
         } else {
             Err(anyhow!(

@@ -8,15 +8,23 @@ fn main() -> tinkv::Result<()> {
     // for k in vec!["a", "b", "c", "d"] {
     //     store.set(k.as_bytes(), k.as_bytes())?;
     // }
-    println!("{:?}", store.get("c".as_bytes()));
-    println!("{:?}", store.stats());
+    println!("initial: {:?}", store.stats());
 
     store.set("hello".as_bytes(), "tinkv".as_bytes())?;
+    println!("after set 1: {:?}", store.stats());
+
+    store.set("hello".as_bytes(), "tinkv 2".as_bytes())?;
+    println!("after set 2: {:?}", store.stats());
+
+    store.set("hello 2".as_bytes(), "tinkv".as_bytes())?;
+    println!("after set 3: {:?}", store.stats());
+
 
     let value = store.get("hello".as_bytes())?;
-    assert_eq!(value, Some("tinkv".as_bytes().to_vec()));
+    assert_eq!(value, Some("tinkv 2".as_bytes().to_vec()));
 
     store.remove("hello".as_bytes())?;
+    println!("after remove: {:?}", store.stats());
 
     let value_not_found = store.get("hello".as_bytes())?;
     assert_eq!(value_not_found, None);
