@@ -12,20 +12,20 @@ use std::path::{Path, PathBuf};
 
 /// Data entry definition.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Entry {
-    pub key: Vec<u8>,
-    pub value: Vec<u8>,
+struct InnerEntry {
+    key: Vec<u8>,
+    value: Vec<u8>,
     // timestamp in nanos.
-    pub timestamp: u128,
+    timestamp: u128,
     // crc32 checksum
     checksum: u32,
 }
 
-impl Entry {
+impl InnerEntry {
     /// New data entry with given key and value.
     /// Checksum will be updated internally.
     fn new(key: &[u8], value: &[u8], timestamp: u128) -> Self {
-        let mut ent = Entry {
+        let mut ent = InnerEntry {
             key: key.into(),
             value: value.into(),
             timestamp,
@@ -41,8 +41,43 @@ impl Entry {
     }
 
     /// Check data entry is corrupted or not.
-    pub(crate) fn is_valid(&self) -> bool {
+    fn is_valid(&self) -> bool {
         self.checksum == self.fresh_checksum()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Entry {
+    inner: InnerEntry,
+    // size of inner entry in log file.
+    pub size: u64,
+    // position of inner entry in log file.
+    pub offset: u64,
+}
+
+impl Entry {
+    fn new(inner: InnerEntry, size: u64, offset: u64) -> Self {
+        Self {
+            inner,
+            size,
+            offset,
+        }
+    }
+
+    pub(crate) fn is_valid(&self) -> bool {
+        self.inner.is_valid()
+    }
+
+    pub(crate) fn key(&self) -> &[u8] {
+        &self.inner.key
+    }
+
+    pub(crate) fn value(&self) -> &[u8] {
+        &self.inner.value
+    }
+
+    pub(crate) fn timestamp(&self) -> u128 {
+        self.inner.timestamp
     }
 }
 
@@ -61,7 +96,7 @@ pub(crate) struct SegmentFile {
     /// File handle of current segment file for reading.
     reader: BufReaderWithOffset<File>,
     /// Segment file size.
-    size: u64,
+    pub size: u64,
 }
 
 impl SegmentFile {
@@ -98,14 +133,14 @@ impl SegmentFile {
     }
 
     /// Save key-value pair to segement file.
-    pub(crate) fn write(&mut self, key: &[u8], value: &[u8], timestamp: u128) -> Result<u64> {
-        let ent = Entry::new(key, value, timestamp);
+    pub(crate) fn write(&mut self, key: &[u8], value: &[u8], timestamp: u128) -> Result<Entry> {
+        let mut inner = InnerEntry::new(key, value, timestamp);
         trace!(
-            "append entry {:?} to segement {}",
-            &ent,
+            "append entry {:?} to segement file {}",
+            &inner,
             self.path.display()
         );
-        let encoded = bincode::serialize(&ent)?;
+        let encoded = bincode::serialize(&inner)?;
         let w = self
             .writer
             .as_mut()
@@ -116,25 +151,41 @@ impl SegmentFile {
         w.flush()?;
 
         self.size = offset + encoded.len() as u64;
-        Ok(offset)
+
+        let entry = Entry::new(inner, encoded.len() as u64, offset);
+        trace!(
+            "successfully append {:?} to segment file {}",
+            &entry,
+            self.path.display()
+        );
+
+        Ok(entry)
     }
 
     /// Read key value in segment file.
     pub(crate) fn read(&mut self, offset: u64) -> Result<Entry> {
         trace!(
-            "read key value with offset {} in file {}",
+            "read key value with offset {} in segment file {}",
             offset,
             self.path.display()
         );
         // Note: we have to get a mutable reader here.
         let reader = &mut self.reader;
         reader.seek(SeekFrom::Start(offset))?;
-        let ent: Entry = bincode::deserialize_from(reader)?;
-        Ok(ent)
+        let mut inner: InnerEntry = bincode::deserialize_from(reader)?;
+
+        let entry = Entry::new(inner, self.reader.offset() - offset, offset);
+        trace!(
+            "successfully read {:?} from segment {}",
+            &entry,
+            self.path.display()
+        );
+        Ok(entry)
     }
 
     pub(crate) fn entry_iter(&self) -> SegmentEntryIter {
         SegmentEntryIter {
+            path: self.path.clone(),
             reader: fs::File::open(self.path.clone()).unwrap(),
         }
     }
@@ -154,16 +205,27 @@ impl Drop for SegmentFile {
 
 #[derive(Debug)]
 pub(crate) struct SegmentEntryIter {
+    path: PathBuf,
     reader: fs::File,
 }
 
 impl Iterator for SegmentEntryIter {
-    type Item = (u64, Entry);
+    type Item = Entry;
 
     fn next(&mut self) -> Option<Self::Item> {
         let offset = self.reader.seek(SeekFrom::Current(0)).unwrap();
-        let ent: Entry = bincode::deserialize_from(&self.reader).ok()?;
-        Some((offset, ent))
+        let mut inner: InnerEntry = bincode::deserialize_from(&self.reader).ok()?;
+        let new_offset = self.reader.seek(SeekFrom::Current(0)).unwrap();
+
+        let entry = Entry::new(inner, new_offset - offset, offset);
+
+        trace!(
+            "successfully read next {:?} from segment file {}",
+            &entry,
+            self.path.display()
+        );
+
+        Some(entry)
     }
 }
 
@@ -175,7 +237,7 @@ mod tests {
     #[test]
     fn test_new_entry() {
         let ts = current_timestamp();
-        let ent = Entry::new(&b"key".to_vec(), &b"value".to_vec(), ts);
+        let ent = InnerEntry::new(&b"key".to_vec(), &b"value".to_vec(), ts);
         assert_eq!(ent.timestamp <= current_timestamp(), true);
         assert_eq!(ent.checksum, 3327521766);
     }
@@ -183,14 +245,14 @@ mod tests {
     #[test]
     fn test_checksum_valid() {
         let ts = current_timestamp();
-        let ent = Entry::new(&b"key".to_vec(), &b"value".to_vec(), ts);
+        let ent = InnerEntry::new(&b"key".to_vec(), &b"value".to_vec(), ts);
         assert_eq!(ent.is_valid(), true);
     }
 
     #[test]
     fn test_checksum_invalid() {
         let ts = current_timestamp();
-        let mut ent = Entry::new(&b"key".to_vec(), &b"value".to_vec(), ts);
+        let mut ent = InnerEntry::new(&b"key".to_vec(), &b"value".to_vec(), ts);
         ent.value = b"value_changed".to_vec();
         assert_eq!(ent.is_valid(), false);
     }

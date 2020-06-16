@@ -57,9 +57,14 @@ impl Store {
         trace!("read segment files with pattern: {}", &pattern);
         for path in glob(&pattern)? {
             let segment = SegmentFile::new(path?.as_path(), false)?;
+
+            self.stats.total_segment_files += 1;
+            self.stats.size_of_all_segment_files += segment.size;
+
             self.segments.insert(segment.id, segment);
         }
         trace!("got {} segment files", self.segments.len());
+
         Ok(())
     }
 
@@ -72,27 +77,32 @@ impl Store {
         for segment_id in segment_ids {
             let segment = self.segments.get(segment_id).unwrap();
             trace!("build key dir from segment file {}", segment.path.display());
-            for (offset, ent) in segment.entry_iter() {
-                if !ent.is_valid() {
-                    return Err(anyhow!("data entry was corrupted, current key is '{}', segment file id {}, offset {}", String::from_utf8_lossy(&ent.key), segment.id, offset));
+            for entry in segment.entry_iter() {
+                if !entry.is_valid() {
+                    return Err(anyhow!("data entry was corrupted, current key is '{}', segment file id {}, offset {}", String::from_utf8_lossy(entry.key()), segment.id, entry.offset));
                 }
 
-                if ent.value == config::REMOVE_TOMESTONE {
-                    self.keydir.remove(&ent.key);
+                if entry.value() == config::REMOVE_TOMESTONE {
+                    self.stats.total_stale_entries += 1;
+                    self.stats.total_active_entries -= 1;
+
+                    self.keydir.remove(entry.key());
                 }
 
-                let keydir_ent = KeyDirEntry::new(segment_id.clone(), offset, ent.timestamp);
-                let existed = self.keydir.get(&ent.key);
+                let keydir_ent =
+                    KeyDirEntry::new(segment_id.clone(), entry.offset, entry.size, entry.timestamp());
+                let existed = self.keydir.get(entry.key());
                 match existed {
                     None => {
-                        self.keydir.insert(ent.key, keydir_ent);
+                        self.keydir.insert(entry.key().into(), keydir_ent);
                     }
                     Some(existed_ent) => {
-                        if existed_ent.timestamp < ent.timestamp {
-                            self.keydir.insert(ent.key, keydir_ent);
+                        if existed_ent.timestamp < entry.timestamp() {
+                            self.keydir.insert(entry.key().into(), keydir_ent);
                         }
                     }
                 }
+                self.stats.total_active_entries += 1;
             }
         }
         info!("build keydir done, got {} keys", self.keydir.len());
@@ -115,6 +125,8 @@ impl Store {
         let segment = SegmentFile::new(p.as_path(), false)?;
         self.segments.insert(segment.id, segment);
 
+        self.stats.total_segment_files += 1;
+
         Ok(())
     }
 
@@ -127,13 +139,13 @@ impl Store {
             .expect("active segment not found");
         let timestamp = util::current_timestamp();
 
-        // Save data to data log file.
-        let offset = segment.write(key, value, timestamp)?;
+        // Save data to log file.
+        let ent = segment.write(key, value, timestamp)?;
 
         // Update key dir, the in-memory index.
         self.keydir.insert(
             key.to_vec(),
-            KeyDirEntry::new(segment.id, offset, timestamp),
+            KeyDirEntry::new(segment.id, ent.offset, ent.size, timestamp),
         );
 
         Ok(())
@@ -141,26 +153,26 @@ impl Store {
 
     /// Get key value from database.
     pub fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        if let Some(ent) = self.keydir.get(key) {
+        if let Some(keydir_ent) = self.keydir.get(key) {
             trace!(
                 "found key '{}' in keydir, got value {:?}",
                 String::from_utf8_lossy(key),
-                &ent
+                &keydir_ent
             );
             let segment = self
                 .segments
-                .get_mut(&ent.segment_id)
-                .expect(format!("segment {} not found", &ent.segment_id).as_str());
-            let data_entry = segment.read(ent.offset).unwrap();
-            if !data_entry.is_valid() {
+                .get_mut(&keydir_ent.segment_id)
+                .expect(format!("segment {} not found", &keydir_ent.segment_id).as_str());
+            let entry = segment.read(keydir_ent.offset).unwrap();
+            if !entry.is_valid() {
                 return Err(anyhow!(
                     "data entry was corrupted, current key is '{}', segment file id {}, offset {}",
                     String::from_utf8_lossy(key),
                     segment.id,
-                    ent.offset
+                    keydir_ent.offset
                 ));
             }
-            return Ok(Some(data_entry.value));
+            return Ok(Some(entry.value().into()));
         } else {
             Ok(None)
         }
@@ -201,16 +213,21 @@ impl Store {
 /// Entry definition in the keydir (the in-memory index).
 #[derive(Debug, Clone, Copy)]
 struct KeyDirEntry {
+    /// segement file that stores key value pair.
     segment_id: u64,
+    /// data entry offset in segment file.
     offset: u64,
+    /// data entry size.
+    size: u64,
     timestamp: u128,
 }
 
 impl KeyDirEntry {
-    fn new(segment_id: u64, offset: u64, timestamp: u128) -> Self {
+    fn new(segment_id: u64, offset: u64, size: u64, timestamp: u128) -> Self {
         KeyDirEntry {
             segment_id,
             offset,
+            size,
             timestamp,
         }
     }
