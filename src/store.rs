@@ -1,10 +1,10 @@
 //! A simple key-value store.
 use crate::config;
 use crate::error::Result;
-use crate::{keydir::KeyDir, log::SegmentFile, util};
+use crate::{log::SegmentFile, util};
 use glob::glob;
 use log::{info, trace};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::create_dir_all;
 
 use anyhow::anyhow;
@@ -23,8 +23,10 @@ pub struct Store {
     segments: HashMap<u64, SegmentFile>,
     // only active segment is writeable.
     active_segment: Option<SegmentFile>,
-    // key dir maintains key value index for fast query.
-    key_dir: KeyDir,
+    // keydir maintains key value index for fast query.
+    keydir: BTreeMap<Vec<u8>, KeyDirEntry>,
+    // size of stale entries that could be reclaimed during compaction.
+    uncompacted: u64,
 }
 
 impl Store {
@@ -38,7 +40,8 @@ impl Store {
             path: path.as_ref().to_path_buf(),
             segments: HashMap::new(),
             active_segment: None,
-            key_dir: KeyDir::new(path.as_ref()),
+            keydir: BTreeMap::new(),
+            uncompacted: 0,
         };
 
         store.open_segments()?;
@@ -69,31 +72,30 @@ impl Store {
         for segment_id in segment_ids {
             let segment = self.segments.get(segment_id).unwrap();
             trace!("build key dir from segment file {}", segment.path.display());
-            for (offset, ent) in segment.iter() {
+            for (offset, ent) in segment.entry_iter() {
                 if !ent.is_valid() {
                     return Err(anyhow!("data entry was corrupted, current key is '{}', segment file id {}, offset {}", String::from_utf8_lossy(&ent.key), segment.id, offset));
                 }
 
                 if ent.value == config::REMOVE_TOMESTONE {
-                    self.key_dir.remove(&ent.key);
+                    self.keydir.remove(&ent.key);
                 }
 
-                let existed = self.key_dir.get(&ent.key);
+                let keydir_ent = KeyDirEntry::new(segment_id.clone(), offset, ent.timestamp);
+                let existed = self.keydir.get(&ent.key);
                 match existed {
                     None => {
-                        self.key_dir
-                            .set(&ent.key, segment.id, offset, ent.timestamp);
+                        self.keydir.insert(ent.key, keydir_ent);
                     }
                     Some(existed_ent) => {
                         if existed_ent.timestamp < ent.timestamp {
-                            self.key_dir
-                                .set(&ent.key, segment.id, offset, ent.timestamp);
+                            self.keydir.insert(ent.key, keydir_ent);
                         }
                     }
                 }
             }
         }
-        info!("build keydir done, got {} keys", self.key_dir.len());
+        info!("build keydir done, got {} keys", self.keydir.len());
         Ok(())
     }
 
@@ -129,14 +131,14 @@ impl Store {
         let offset = segment.write(key, value, timestamp)?;
 
         // Update key dir, the in-memory index.
-        self.key_dir.set(key, segment.id, offset, timestamp);
+        self.keydir.insert(key.to_vec(), KeyDirEntry::new(segment.id, offset, timestamp));
 
         Ok(())
     }
 
     /// Get key value from database.
     pub fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        if let Some(ent) = self.key_dir.get(key) {
+        if let Some(ent) = self.keydir.get(key) {
             trace!(
                 "found key '{}' in keydir, got value {:?}",
                 String::from_utf8_lossy(key),
@@ -163,7 +165,7 @@ impl Store {
 
     /// Remove key value from database.
     pub fn remove(&mut self, key: &[u8]) -> Result<()> {
-        if self.key_dir.contains_key(key) {
+        if self.keydir.contains_key(key) {
             let segment = self
                 .active_segment
                 .as_mut()
@@ -172,7 +174,7 @@ impl Store {
             // Write tomestone, will be removed on compaction.
             segment.write(key, config::REMOVE_TOMESTONE, timestamp)?;
             // Remove key from in-memory index.
-            self.key_dir.remove(key).expect("key not found");
+            self.keydir.remove(key).expect("key not found");
             Ok(())
         } else {
             Err(anyhow!(
@@ -182,14 +184,26 @@ impl Store {
         }
     }
 
-    /// Clear staled entries from segment files.
-    /// Merge segment files.
+    /// Clear staled entries from segment files and reclaim disk space.
     pub fn compact(&mut self) -> Result<()> {
-        self.remove_staled_files()?;
         Ok(())
     }
+}
 
-    fn remove_staled_files(&mut self) -> Result<()> {
-        Ok(())
+/// Entry definition in the keydir (the in-memory index).
+#[derive(Debug, Clone, Copy)]
+struct KeyDirEntry {
+    segment_id: u64,
+    offset: u64,
+    timestamp: u128,
+}
+
+impl KeyDirEntry {
+    fn new(segment_id: u64, offset: u64, timestamp: u128) -> Self {
+        KeyDirEntry {
+            segment_id,
+            offset,
+            timestamp,
+        }
     }
 }

@@ -133,7 +133,7 @@ impl SegmentFile {
         Ok(ent)
     }
 
-    pub(crate) fn iter(&self) -> SegmentEntryIter {
+    pub(crate) fn entry_iter(&self) -> SegmentEntryIter {
         SegmentEntryIter {
             reader: fs::File::open(self.path.clone()).unwrap(),
         }

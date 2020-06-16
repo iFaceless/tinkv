@@ -8,6 +8,6 @@ fn main() -> tinkv::Result<()> {
     // for k in vec!["a", "b", "c", "d"] {
     //     store.set(k.as_bytes(), k.as_bytes())?;
     // }
-    println!("{:?}", store.get("a".as_bytes()));
+    println!("{:?}", store.get("c".as_bytes()));
     Ok(())
 }

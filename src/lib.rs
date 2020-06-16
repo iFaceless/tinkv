@@ -2,7 +2,6 @@
 mod config;
 mod error;
 mod hint;
-mod keydir;
 mod log;
 mod store;
 pub mod util;
