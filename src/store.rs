@@ -25,8 +25,8 @@ pub struct Store {
     active_segment: Option<SegmentFile>,
     // keydir maintains key value index for fast query.
     keydir: BTreeMap<Vec<u8>, KeyDirEntry>,
-    // size of stale entries that could be reclaimed during compaction.
-    uncompacted: u64,
+    /// monitor tinkv store status, record statistics data.
+    stats: Stats,
 }
 
 impl Store {
@@ -41,7 +41,7 @@ impl Store {
             segments: HashMap::new(),
             active_segment: None,
             keydir: BTreeMap::new(),
-            uncompacted: 0,
+            stats: Stats::default(),
         };
 
         store.open_segments()?;
@@ -131,7 +131,10 @@ impl Store {
         let offset = segment.write(key, value, timestamp)?;
 
         // Update key dir, the in-memory index.
-        self.keydir.insert(key.to_vec(), KeyDirEntry::new(segment.id, offset, timestamp));
+        self.keydir.insert(
+            key.to_vec(),
+            KeyDirEntry::new(segment.id, offset, timestamp),
+        );
 
         Ok(())
     }
@@ -188,6 +191,11 @@ impl Store {
     pub fn compact(&mut self) -> Result<()> {
         Ok(())
     }
+
+    /// Return stats of storage engine.
+    pub fn stats(&mut self) -> &Stats {
+        &self.stats
+    }
 }
 
 /// Entry definition in the keydir (the in-memory index).
@@ -206,4 +214,19 @@ impl KeyDirEntry {
             timestamp,
         }
     }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct Stats {
+    /// size of stale entries in log files, which can be
+    /// deleted after a compaction.
+    pub size_of_stale_entries: u64,
+    /// total stale entries in log files.
+    pub total_stale_entries: u64,
+    /// total active key value pairs in store.
+    pub total_active_entries: u64,
+    /// total log segment files.
+    pub total_segment_files: u64,
+    /// total size of all log segment files.
+    pub size_of_all_segment_files: u64,
 }
