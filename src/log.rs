@@ -5,7 +5,7 @@ use crate::util::{checksum, parse_file_id, BufReaderWithOffset, BufWriterWithOff
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-use log::{trace};
+use log::trace;
 use std::fs::{self, File};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -15,14 +15,16 @@ use std::path::{Path, PathBuf};
 pub struct Entry {
     pub key: Vec<u8>,
     pub value: Vec<u8>,
-    // timestamp in seconds
-    pub timestamp: u32,
+    // timestamp in nanos.
+    pub timestamp: u128,
     // crc32 checksum
     checksum: u32,
 }
 
 impl Entry {
-    fn new(key: &[u8], value: &[u8], timestamp: u32) -> Self {
+    /// New data entry with given key and value.
+    /// Checksum will be updated internally.
+    fn new(key: &[u8], value: &[u8], timestamp: u128) -> Self {
         let mut ent = Entry {
             key: key.into(),
             value: value.into(),
@@ -38,6 +40,7 @@ impl Entry {
         checksum(&[self.key.clone(), self.value.clone()].concat())
     }
 
+    /// Check data entry is corrupted or not.
     pub(crate) fn is_valid(&self) -> bool {
         self.checksum == self.fresh_checksum()
     }
@@ -95,7 +98,7 @@ impl SegmentFile {
     }
 
     /// Save key-value pair to segement file.
-    pub(crate) fn write(&mut self, key: &[u8], value: &[u8], timestamp: u32) -> Result<u64> {
+    pub(crate) fn write(&mut self, key: &[u8], value: &[u8], timestamp: u128) -> Result<u64> {
         let ent = Entry::new(key, value, timestamp);
         trace!(
             "append entry {:?} to segement {}",

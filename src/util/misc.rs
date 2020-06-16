@@ -1,12 +1,13 @@
 //! Define some helper functions.
-use chrono;
 use crc;
-use std::io::prelude::*;
-
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-pub fn current_timestamp() -> u32 {
-    chrono::Local::now().timestamp() as u32
+pub fn current_timestamp() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time went backwards")
+        .as_nanos()
 }
 
 pub fn checksum(data: &[u8]) -> u32 {

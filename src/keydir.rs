@@ -8,7 +8,7 @@ use std::path::Path;
 pub struct Entry {
     pub segment_id: u64,
     pub offset: u64,
-    pub timestamp: u32,
+    pub timestamp: u128,
 }
 
 #[derive(Debug)]
@@ -23,7 +23,7 @@ impl KeyDir {
         }
     }
 
-    pub(crate) fn set(&mut self, key: &[u8], segment_id: u64, offset: u64, timestamp: u32) {
+    pub(crate) fn set(&mut self, key: &[u8], segment_id: u64, offset: u64, timestamp: u128) {
         let ent = Entry {
             segment_id,
             offset,
