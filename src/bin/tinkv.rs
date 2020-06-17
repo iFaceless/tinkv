@@ -34,8 +34,8 @@ fn main() -> tinkv::Result<()> {
 
     let value_not_found = store.get("hello".as_bytes())?;
     assert_eq!(value_not_found, None);
-    
-    store.compact()?;
+
+    // store.compact()?;
     println!("after compaction: {:?}", store.stats());
 
     let v = store.get("key_1".as_bytes())?.unwrap();
