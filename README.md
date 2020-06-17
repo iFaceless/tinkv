@@ -7,6 +7,8 @@ Happy hacking~
 # Usage
 ## As a library
 
+Full example usage can be found in [examples/basic.rs](./examples/basic.rs).
+
 ```rust
 use pretty_env_logger;
 use tinkv::{self, Store};
@@ -38,6 +40,28 @@ fn main() -> tinkv::Result<()> {
 - `get <key>`
 - `set <key> <value>`
 - `del <key>`
+
+# Compaction
+
+Compation process will be triggered if `size_of_stale_entries >= 10MB` after each call of `set/remove`. Compaction policy is very simple and easy to understand:
+1. Freeze current active segment, and switch to another one.
+2. Create a compaction segment file, then iterate all the entries in `keydir` (in-memory hash table), copy related data entries into compaction file and update `keydir`.
+3. Remove all the stale segment files.
+
+You can call `Store::compact()` method to trigger compaction process if nessesary.
+
+```rust
+use pretty_env_logger;
+use tinkv::{self, Store};
+
+fn main() -> tinkv::Result<()> {
+    pretty_env_logger::init();
+    let mut store = Store::open("/path/to/tinkv")?;
+    store.compact()?;
+
+    Ok(())
+}
+```
 
 # Refs
 
