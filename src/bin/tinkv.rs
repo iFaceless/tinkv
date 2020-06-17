@@ -19,7 +19,6 @@ fn main() -> tinkv::Result<()> {
     store.set("hello 2".as_bytes(), "tinkv".as_bytes())?;
     println!("after set 3: {:?}", store.stats());
 
-
     let value = store.get("hello".as_bytes())?;
     assert_eq!(value, Some("tinkv 2".as_bytes().to_vec()));
 
@@ -28,6 +27,9 @@ fn main() -> tinkv::Result<()> {
 
     let value_not_found = store.get("hello".as_bytes())?;
     assert_eq!(value_not_found, None);
+    
+    store.compact()?;
+    println!("after compaction: {:?}", store.stats());
 
     Ok(())
 }
