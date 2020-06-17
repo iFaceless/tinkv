@@ -5,9 +5,9 @@ use crate::util::{checksum, parse_file_id, BufReaderWithOffset, BufWriterWithOff
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-use log::{trace, error};
+use log::{error, trace};
 use std::fs::{self, File};
-use std::io::{Seek, SeekFrom, Read, Write, copy};
+use std::io::{copy, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 /// Data entry definition.
@@ -192,7 +192,12 @@ impl SegmentFile {
 
     /// Copy `size` bytes from `src` segment file.
     /// Return offset of the newly written entry.
-    pub(crate) fn copy_bytes_from(&mut self, src: &mut SegmentFile, offset: u64, size: u64) -> Result<u64> {
+    pub(crate) fn copy_bytes_from(
+        &mut self,
+        src: &mut SegmentFile,
+        offset: u64,
+        size: u64,
+    ) -> Result<u64> {
         let reader = &mut src.reader;
         if reader.offset() != offset {
             reader.seek(SeekFrom::Start(offset))?;
@@ -220,7 +225,7 @@ impl SegmentFile {
     pub(crate) fn flush(&mut self) -> Result<()> {
         if self.writeable {
             self.writer.as_mut().unwrap().flush()?;
-        } 
+        }
         Ok(())
     }
 }
@@ -228,7 +233,11 @@ impl SegmentFile {
 impl Drop for SegmentFile {
     fn drop(&mut self) {
         if let Err(e) = self.flush() {
-            error!("failed to flush segment file: {}, got error: {}", self.path.display(), e);
+            error!(
+                "failed to flush segment file: {}, got error: {}",
+                self.path.display(),
+                e
+            );
         }
 
         // auto clean up if file size is zero.
@@ -252,7 +261,7 @@ impl Iterator for SegmentEntryIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         let offset = self.reader.seek(SeekFrom::Current(0)).unwrap();
-        let mut inner: InnerEntry = bincode::deserialize_from(&self.reader).ok()?;
+        let inner: InnerEntry = bincode::deserialize_from(&self.reader).ok()?;
         let new_offset = self.reader.seek(SeekFrom::Current(0)).unwrap();
 
         let entry = Entry::new(inner, new_offset - offset, offset);
