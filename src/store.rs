@@ -3,7 +3,7 @@ use crate::config;
 use crate::error::Result;
 use crate::{log::SegmentFile, util};
 use glob::glob;
-use log::{debug, info, trace};
+use log::{info, trace};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::fs::create_dir_all;
