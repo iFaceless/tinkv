@@ -11,7 +11,7 @@ use std::io::{copy, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 /// Data entry definition.
-/// It will be serialized and saved to segment file.
+/// It will be serialized and saved to segment log file.
 #[derive(Serialize, Deserialize, Debug)]
 struct InnerEntry {
     key: Vec<u8>,
@@ -88,9 +88,9 @@ impl Entry {
     }
 }
 
-/// SegmentFile represents a immutable or immutalbe data log file.
+/// SegmentFile represents a data log file.
 #[derive(Debug)]
-pub(crate) struct SegmentFile {
+pub(crate) struct SegmentLogFile {
     pub path: PathBuf,
     /// Segment file id (12 digital characters).
     pub id: u64,
@@ -106,7 +106,7 @@ pub(crate) struct SegmentFile {
     pub size: u64,
 }
 
-impl SegmentFile {
+impl SegmentLogFile {
     /// Create a new segment file instance.
     /// It parses segment id from file path, which wraps an optional
     /// writer (only for writeable segement file) and reader.
@@ -127,7 +127,7 @@ impl SegmentFile {
 
         let file = fs::File::open(path)?;
         let size = file.metadata()?.len();
-        let sf = SegmentFile {
+        let sf = SegmentLogFile {
             path: path.to_path_buf(),
             id: file_id,
             writeable,
@@ -154,9 +154,8 @@ impl SegmentFile {
             .ok_or(anyhow!("segment file is not writeable"))?;
         let offset = w.offset();
         w.write(&encoded)?;
-        // TODO: custom flushing strategies.
         w.flush()?;
-
+        
         self.size = offset + encoded.len() as u64;
 
         let entry = Entry::new(inner, encoded.len() as u64, offset);
@@ -183,7 +182,7 @@ impl SegmentFile {
 
         let entry = Entry::new(inner, self.reader.offset() - offset, offset);
         trace!(
-            "successfully read {:?} from segment {}",
+            "successfully read {:?} from segment log file {}",
             &entry,
             self.path.display()
         );
@@ -194,7 +193,7 @@ impl SegmentFile {
     /// Return offset of the newly written entry.
     pub(crate) fn copy_bytes_from(
         &mut self,
-        src: &mut SegmentFile,
+        src: &mut SegmentLogFile,
         offset: u64,
         size: u64,
     ) -> Result<u64> {
@@ -204,7 +203,7 @@ impl SegmentFile {
         }
 
         let mut r = reader.take(size);
-        let w = self.writer.as_mut().expect("segment file is not writeable");
+        let w = self.writer.as_mut().expect("segment log file is not writeable");
         let offset = w.offset();
 
         let num_bytes = copy(&mut r, w)?;
@@ -214,8 +213,8 @@ impl SegmentFile {
     }
 
     /// Return an entry iterator.
-    pub(crate) fn entry_iter(&self) -> SegmentEntryIter {
-        SegmentEntryIter {
+    pub(crate) fn entry_iter(&self) -> EntryIter {
+        EntryIter {
             path: self.path.clone(),
             reader: fs::File::open(self.path.clone()).unwrap(),
         }
@@ -230,11 +229,11 @@ impl SegmentFile {
     }
 }
 
-impl Drop for SegmentFile {
+impl Drop for SegmentLogFile {
     fn drop(&mut self) {
         if let Err(e) = self.flush() {
             error!(
-                "failed to flush segment file: {}, got error: {}",
+                "failed to flush segment log file: {}, got error: {}",
                 self.path.display(),
                 e
             );
@@ -243,7 +242,7 @@ impl Drop for SegmentFile {
         // auto clean up if file size is zero.
         if self.writeable && self.size == 0 && fs::remove_file(self.path.as_path()).is_ok() {
             trace!(
-                "segment file '{}' is empty, remove it.",
+                "segment log file '{}' is empty, remove it.",
                 self.path.display()
             );
         }
@@ -251,12 +250,12 @@ impl Drop for SegmentFile {
 }
 
 #[derive(Debug)]
-pub(crate) struct SegmentEntryIter {
+pub(crate) struct EntryIter {
     path: PathBuf,
     reader: fs::File,
 }
 
-impl Iterator for SegmentEntryIter {
+impl Iterator for EntryIter {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -267,7 +266,7 @@ impl Iterator for SegmentEntryIter {
         let entry = Entry::new(inner, new_offset - offset, offset);
 
         trace!(
-            "successfully read next {:?} from segment file {}",
+            "successfully read entry {:?} from segment log file {}",
             &entry,
             self.path.display()
         );
