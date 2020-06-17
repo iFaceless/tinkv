@@ -5,10 +5,17 @@ use tinkv::{self, Store};
 fn main() -> tinkv::Result<()> {
     pretty_env_logger::init();
     let mut store = Store::open(".tinkv")?;
-    // for k in vec!["a", "b", "c", "d"] {
-    //     store.set(k.as_bytes(), k.as_bytes())?;
-    // }
+    for i in 0..10 {
+        let k = format!("key_{}", i);
+        let v = format!("value_{}_{}", i, tinkv::util::current_timestamp());
+        store.set(k.as_bytes(), v.as_bytes())?;
+        store.set(k.as_bytes(), v.as_bytes())?;
+    }
+
     println!("initial: {:?}", store.stats());
+
+    let v = store.get("key_1".as_bytes())?.unwrap();
+    println!("key_1 => {:?}", String::from_utf8_lossy(&v));
 
     store.set("hello".as_bytes(), "tinkv".as_bytes())?;
     println!("after set 1: {:?}", store.stats());
@@ -30,6 +37,9 @@ fn main() -> tinkv::Result<()> {
     
     store.compact()?;
     println!("after compaction: {:?}", store.stats());
+
+    let v = store.get("key_1".as_bytes())?.unwrap();
+    println!("key_1 => {:?}", String::from_utf8_lossy(&v));
 
     Ok(())
 }

@@ -77,7 +77,7 @@ impl Store {
 
         for segment_id in segment_ids {
             let segment = self.segments.get(segment_id).unwrap();
-            debug!("build key dir from segment file {}", segment.path.display());
+            info!("build key dir from segment file {}", segment.path.display());
             for entry in segment.entry_iter() {
                 if !entry.is_valid() {
                     return Err(anyhow!("data entry was corrupted, current key is '{}', segment file id {}, offset {}", String::from_utf8_lossy(entry.key()), segment.id, entry.offset));
@@ -159,8 +159,14 @@ impl Store {
             KeyDirEntry::new(segment.id, ent.offset, ent.size, timestamp),
         );
 
-        if old.is_none() {
-            self.stats.total_active_entries += 1;
+        match old {
+            None => {
+                self.stats.total_active_entries += 1;
+            }
+            Some(entry) => {
+                self.stats.size_of_stale_entries += entry.size;
+                self.stats.total_stale_entries += 1;
+            }
         }
 
         self.stats.size_of_all_segment_files += ent.size;
@@ -270,7 +276,7 @@ impl Store {
         // remove stale segments.
         let mut stale_segment_count = 0;
         for segment in self.segments.values() {
-            if segment.id < compaction_segment.id {
+            if segment.id < compaction_segment_id {
                 trace!("try to remove stale segment: {}", segment.path.display());
                 fs::remove_file(&segment.path)?;
                 stale_segment_count += 1;
@@ -279,6 +285,12 @@ impl Store {
 
         self.segments.retain(|&k, _| k >= compaction_segment_id);
         trace!("cleaned {} stale segments", stale_segment_count);
+
+        // register read-only compaction segment.
+        self.segments.insert(
+            compaction_segment.id,
+            SegmentFile::new(&compaction_segment.path, false)?,
+        );
 
         // update stats.
         self.stats.total_segment_files = self.segments.len() as u64;
