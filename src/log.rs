@@ -5,9 +5,9 @@ use crate::util::{checksum, parse_file_id, BufReaderWithOffset, BufWriterWithOff
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-use log::trace;
+use log::{trace, error};
 use std::fs::{self, File};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Read, Write, copy};
 use std::path::{Path, PathBuf};
 
 /// Data entry definition.
@@ -141,7 +141,7 @@ impl SegmentFile {
 
     /// Save key-value pair to segement file.
     pub(crate) fn write(&mut self, key: &[u8], value: &[u8], timestamp: u128) -> Result<Entry> {
-        let mut inner = InnerEntry::new(key, value, timestamp);
+        let inner = InnerEntry::new(key, value, timestamp);
         trace!(
             "append entry {:?} to segement file {}",
             &inner,
@@ -179,7 +179,7 @@ impl SegmentFile {
         // Note: we have to get a mutable reader here.
         let reader = &mut self.reader;
         reader.seek(SeekFrom::Start(offset))?;
-        let mut inner: InnerEntry = bincode::deserialize_from(reader)?;
+        let inner: InnerEntry = bincode::deserialize_from(reader)?;
 
         let entry = Entry::new(inner, self.reader.offset() - offset, offset);
         trace!(
@@ -190,16 +190,47 @@ impl SegmentFile {
         Ok(entry)
     }
 
+    /// Copy `size` bytes from `src` segment file.
+    /// Return offset of the newly written entry.
+    pub(crate) fn copy_bytes_from(&mut self, src: &mut SegmentFile, offset: u64, size: u64) -> Result<u64> {
+        let reader = &mut src.reader;
+        if reader.offset() != offset {
+            reader.seek(SeekFrom::Start(offset))?;
+        }
+
+        let mut r = reader.take(size);
+        let w = self.writer.as_mut().expect("segment file is not writeable");
+        let offset = w.offset();
+
+        let num_bytes = copy(&mut r, w)?;
+        assert_eq!(num_bytes, size);
+        self.size += num_bytes;
+        Ok(offset)
+    }
+
+    /// Return an entry iterator.
     pub(crate) fn entry_iter(&self) -> SegmentEntryIter {
         SegmentEntryIter {
             path: self.path.clone(),
             reader: fs::File::open(self.path.clone()).unwrap(),
         }
     }
+
+    /// Flush buf writer.
+    pub(crate) fn flush(&mut self) -> Result<()> {
+        if self.writeable {
+            self.writer.as_mut().unwrap().flush()?;
+        } 
+        Ok(())
+    }
 }
 
 impl Drop for SegmentFile {
     fn drop(&mut self) {
+        if let Err(e) = self.flush() {
+            error!("failed to flush segment file: {}, got error: {}", self.path.display(), e);
+        }
+
         // auto clean up if file size is zero.
         if self.writeable && self.size == 0 && fs::remove_file(self.path.as_path()).is_ok() {
             trace!(
