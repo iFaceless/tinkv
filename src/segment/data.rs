@@ -1,6 +1,6 @@
 //! Maintain log files.
 use crate::error::Result;
-use crate::util::{checksum, parse_file_id, BufReaderWithOffset, BufWriterWithOffset};
+use crate::util::{checksum, parse_file_id, BufReaderWithOffset, FileWithBufWriter};
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
@@ -115,17 +115,16 @@ impl fmt::Display for Entry {
 
 /// DataFile represents a data log file.
 #[derive(Debug)]
-pub(crate) struct DataFile<'a> {
+pub(crate) struct DataFile {
     pub path: PathBuf,
     /// Data file id (12 digital characters).
     pub id: u64,
     /// Only one data file can be writeable at any time.
     /// Mark current data file can be writeable or not.
     writeable: bool,
-    /// File handle of current data file for writting.
-    /// Only writeable file can hold a writer.
-    writer: Option<BufWriterWithOffset<&'a File>>,
-    inner: Option<File>,
+
+    /// File handle of data file for writting.
+    writer: Option<FileWithBufWriter>,
 
     /// File handle of current data file for reading.
     reader: BufReaderWithOffset<File>,
@@ -133,7 +132,7 @@ pub(crate) struct DataFile<'a> {
     pub size: u64,
 }
 
-impl<'a> DataFile<'a> {
+impl DataFile {
     /// Create a new data file instance.
     /// It parses data id from file path, which wraps an optional
     /// writer (only for writeable segement file) and reader.
@@ -142,30 +141,27 @@ impl<'a> DataFile<'a> {
         let file_id = parse_file_id(path).expect("file id not found in file path");
 
         let mut w = None;
-        let mut inner = None;
         if writeable {
             let f = fs::OpenOptions::new()
                 .create(true)
                 .write(true)
                 .append(true)
                 .open(path)?;
-            w = Some(BufWriterWithOffset::new(&f)?);
-            inner = Some(f);
+            w = Some(FileWithBufWriter::from(f)?);
         }
 
         let file = fs::File::open(path)?;
         let size = file.metadata()?.len();
-        let sf = DataFile {
+        let df = DataFile {
             path: path.to_path_buf(),
             id: file_id,
             writeable,
             reader: BufReaderWithOffset::new(file)?,
             writer: w,
-            inner: inner,
             size: size,
         };
 
-        Ok(sf)
+        Ok(df)
     }
 
     /// Save key-value pair to segement file.
@@ -248,8 +244,8 @@ impl<'a> DataFile<'a> {
     /// Flush all pending writes to disk.
     pub(crate) fn sync(&mut self) -> Result<()> {
         self.flush()?;
-        if self.inner.is_some() {
-            self.inner.as_mut().unwrap().sync_all()?;
+        if self.writer.is_some() {
+            self.writer.as_mut().unwrap().sync()?;
         }
         Ok(())
     }
@@ -263,7 +259,7 @@ impl<'a> DataFile<'a> {
     }
 }
 
-impl<'a> Drop for DataFile<'a> {
+impl Drop for DataFile {
     fn drop(&mut self) {
         if let Err(e) = self.sync() {
             error!(

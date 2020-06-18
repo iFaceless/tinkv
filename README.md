@@ -35,7 +35,7 @@ fn main() -> tinkv::Result<()> {
 Public APIs of tinkv store are very easy to use:
 | API                |                   Description                                 |
 |--------------------|---------------------------------------------------------------|
-|`Store::open(path)` | Open a new or existing datastore. The directory must be writeable and readable for tinkv store.|
+|`Store::open(path)` | Open a new or existing datastore. The directory must be writeable and readable for tinkv store.|`
 |`store.get(key)`    | Get value by key from datastore.|
 |`store.set(key, value)`| Store a key value pair into datastore.|
 |`store.remove(key, value)`| Remove a key from datastore.|

@@ -18,20 +18,20 @@ use std::path::{Path, PathBuf};
 ///
 /// Key/value pairs are persisted in log files.
 #[derive(Debug)]
-pub struct Store<'a> {
+pub struct Store {
     // directory for database.
     path: PathBuf,
     // holds a bunch of data files.
-    data_files: HashMap<u64, DataFile<'a>>,
+    data_files: HashMap<u64, DataFile>,
     // only active data file is writeable.
-    active_data_file: Option<DataFile<'a>>,
+    active_data_file: Option<DataFile>,
     // keydir maintains key value index for fast query.
     keydir: BTreeMap<Vec<u8>, KeyDirEntry>,
     /// monitor tinkv store status, record statistics data.
     stats: Stats,
 }
 
-impl<'a> Store<'a> {
+impl Store {
     /// Initialize key value store with the given path.
     /// If the given path not found, a new one will be created.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
@@ -267,6 +267,7 @@ impl<'a> Store<'a> {
 
         // create a new hint file to store compaction file index.
         let hint_file_path = segment_hint_file_path(&self.path, compaction_data_file_id);
+
         trace!("create compaction hint file: {}", hint_file_path.display());
         let mut hint_file = HintFile::new(&hint_file_path, true)?;
 
@@ -284,8 +285,7 @@ impl<'a> Store<'a> {
                 df.path.display(),
                 compaction_df.path.display()
             );
-            let offset =
-                compaction_df.copy_bytes_from(df, keydir_ent.offset, keydir_ent.size)?;
+            let offset = compaction_df.copy_bytes_from(df, keydir_ent.offset, keydir_ent.size)?;
 
             keydir_ent.segment_id = compaction_df.id;
             keydir_ent.offset = offset;
@@ -322,10 +322,8 @@ impl<'a> Store<'a> {
         trace!("cleaned {} stale segments", stale_segment_count);
 
         // register read-only compaction data file.
-        self.data_files.insert(
-            compaction_df.id,
-            DataFile::new(&compaction_df.path, false)?,
-        );
+        self.data_files
+            .insert(compaction_df.id, DataFile::new(&compaction_df.path, false)?);
 
         // update stats.
         self.stats.total_data_files = self.data_files.len() as u64;
@@ -351,8 +349,7 @@ impl<'a> Store<'a> {
     }
 
     /// Return all keys in data store.
-    pub fn keys(&self) -> impl Iterator<Item = &Vec<u8>>
-    {
+    pub fn keys(&self) -> impl Iterator<Item = &Vec<u8>> {
         self.keydir.keys()
     }
 
@@ -368,6 +365,14 @@ impl<'a> Store<'a> {
     pub fn close(&mut self) -> Result<()> {
         self.sync()?;
         Ok(())
+    }
+}
+
+impl Drop for Store {
+    fn drop(&mut self) { 
+        // ignore sync errors.
+        trace!("sync all pending writes to disk.");
+        let _r = self.sync();
     }
 }
 

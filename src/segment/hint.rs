@@ -1,14 +1,14 @@
 //! Maintain hint files. Each compacted log file
 //! should bind with a hint file for faster loading.
 use crate::error::Result;
-use crate::util::parse_file_id;
+use crate::util::{parse_file_id, FileWithBufWriter};
 use bincode;
 use log::{error, trace};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs::{self, File};
 use std::io::prelude::*;
-use std::io::{BufReader, BufWriter, SeekFrom};
+use std::io::{BufReader, SeekFrom};
 use std::path::{Path, PathBuf};
 
 /// Entry in the hint file.
@@ -35,40 +35,37 @@ impl fmt::Display for Entry {
 /// TinKV can rebuild keydir (in-memory index) much faster if hint file
 /// exists.
 #[derive(Debug)]
-pub struct HintFile<'a> {
+pub struct HintFile {
     pub path: PathBuf,
     pub id: u64,
     entries_written: u64,
     writeable: bool,
-    writer: Option<BufWriter<&'a File>>,
-    inner: Option<File>,
+    writer: Option<FileWithBufWriter>,
     reader: BufReader<File>,
 }
 
-impl<'a> HintFile<'a> {
+impl HintFile {
     pub(crate) fn new(path: &Path, writeable: bool) -> Result<Self> {
         // File name must starts with valid file id.
         let file_id = parse_file_id(path).expect("file id not found in file path");
-        let mut inner = None;
-        let mut w = None;
-        
+
+        let mut w= None;
         if writeable {
             let f = fs::OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .append(true)
-                    .open(path)?;
-            w = Some(BufWriter::new(&f));
-            inner = Some(f);
+                .create(true)
+                .write(true)
+                .append(true)
+                .open(path)?;
+                
+            w = Some(FileWithBufWriter::from(f)?);
         }
-        
+
         Ok(Self {
             path: path.to_path_buf(),
             id: file_id,
-            writer: w,
-            writeable,
-            inner: inner,
             entries_written: 0,
+            writeable: writeable,
+            writer: w,
             reader: BufReader::new(File::open(path)?),
         })
     }
@@ -81,7 +78,7 @@ impl<'a> HintFile<'a> {
         };
         trace!("append {} to file {}", &entry, self.path.display());
 
-        let w = self.writer.as_mut().expect("hint file is not writeable");
+        let w = &mut self.writer.as_mut().expect("hint file is not writeable");
         bincode::serialize_into(w, &entry)?;
         self.entries_written += 1;
 
@@ -90,11 +87,11 @@ impl<'a> HintFile<'a> {
         Ok(())
     }
 
-    /// Flush all pending writes to disk.
+    /// Sync all pending writes to disk.
     pub(crate) fn sync(&mut self) -> Result<()> {
         self.flush()?;
-        if self.inner.is_some() {
-            self.inner.as_mut().unwrap().sync_all()?;
+        if self.writer.is_some() {
+            self.writer.as_mut().unwrap().sync()?;
         }
         Ok(())
     }
@@ -107,12 +104,12 @@ impl<'a> HintFile<'a> {
         Ok(())
     }
 
-    pub(crate) fn entry_iter(&'a mut self) -> EntryIter<'a> {
+    pub(crate) fn entry_iter(&mut self) -> EntryIter {
         EntryIter::new(self)
     }
 }
 
-impl<'a> Drop for HintFile<'a> {
+impl Drop for HintFile {
     fn drop(&mut self) {
         if let Err(e) = self.sync() {
             error!(
@@ -132,12 +129,12 @@ impl<'a> Drop for HintFile<'a> {
 }
 
 pub(crate) struct EntryIter<'a> {
-    hint_file: &'a mut HintFile<'a>,
+    hint_file: &'a mut HintFile,
     offset: u64,
 }
 
 impl<'a> EntryIter<'a> {
-    fn new(hint_file: &'a mut HintFile<'a>) -> Self {
+    fn new(hint_file: &'a mut HintFile) -> Self {
         EntryIter {
             hint_file,
             offset: 0,

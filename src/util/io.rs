@@ -1,4 +1,5 @@
 //! Some io helpers.
+use std::fs;
 use std::io::prelude::*;
 use std::io::{self, BufReader, BufWriter, SeekFrom};
 
@@ -73,5 +74,66 @@ impl<W: Write + Seek> Seek for BufWriterWithOffset<W> {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         self.offset = self.writer.seek(pos)?;
         Ok(self.offset)
+    }
+}
+
+/// A file wrapper wraps `File` and `BufWriterWithOffset<File>`.
+/// We're using `BufWriterWithOffset` here for better writting performance.
+/// Also, we need to make sure `file.sync_all()` can be called manually to
+/// flush all pending writes to disk.
+#[derive(Debug)]
+pub struct FileWithBufWriter {
+    inner: fs::File,
+    bw: BufWriterWithOffset<fs::File>,
+}
+
+impl FileWithBufWriter {
+    pub fn from(inner: fs::File) -> io::Result<FileWithBufWriter> {
+        let bw = BufWriterWithOffset::new(inner.try_clone()?)?;
+
+        Ok(FileWithBufWriter {
+            inner: inner,
+            bw: bw,
+        })
+    }
+
+    pub fn inner(&self) -> &fs::File {
+        &self.inner
+    }
+
+    pub fn inner_mut(&mut self) -> &mut fs::File {
+        &mut self.inner
+    }
+
+    pub fn sync(&mut self) -> io::Result<()> {
+        self.flush()?;
+        self.inner.sync_all()
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.bw.offset()
+    }
+}
+
+impl Drop for FileWithBufWriter {
+    fn drop(&mut self) {
+        // ignore sync errors.
+        let _r = self.sync();
+    }
+}
+
+impl Write for FileWithBufWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.bw.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.bw.flush()
+    }
+}
+
+impl Seek for FileWithBufWriter {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.bw.seek(pos)
     }
 }

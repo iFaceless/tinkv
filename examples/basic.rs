@@ -1,9 +1,8 @@
 //! TinKV command line app.
 use pretty_env_logger;
-use tinkv::{self, Store};
-use std::io::prelude::*;
 use std::fs::File;
-use std::io::{BufWriter};
+
+use tinkv::{self};
 
 fn main() -> tinkv::Result<()> {
     pretty_env_logger::init();
@@ -44,7 +43,7 @@ fn main() -> tinkv::Result<()> {
     // let v = store.get("key_1".as_bytes())?.unwrap();
     // println!("key_1 => {:?}", String::from_utf8_lossy(&v));
 
-    let f = File::open("examples/basic.rs")?;
+    let _f = File::open("examples/basic.rs")?;
 
     Ok(())
 }
