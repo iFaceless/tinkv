@@ -1,7 +1,7 @@
 //! A simple key-value store.
 use crate::config;
 use crate::error::Result;
-use crate::{log::SegmentFile, util};
+use crate::{hint::SegmentHintFile, log::SegmentLogFile, util};
 use glob::glob;
 use log::{info, trace};
 use std::collections::{BTreeMap, HashMap};
@@ -21,9 +21,9 @@ pub struct Store {
     // directory for database.
     path: PathBuf,
     // holds a bunch of segments.
-    segments: HashMap<u64, SegmentFile>,
+    segments: HashMap<u64, SegmentLogFile>,
     // only active segment is writeable.
-    active_segment: Option<SegmentFile>,
+    active_segment: Option<SegmentLogFile>,
     // keydir maintains key value index for fast query.
     keydir: BTreeMap<Vec<u8>, KeyDirEntry>,
     /// monitor tinkv store status, record statistics data.
@@ -54,10 +54,10 @@ impl Store {
 
     /// Open segment files (they are immutable).
     fn open_segments(&mut self) -> Result<()> {
-        let pattern = format!("{}/*{}", self.path.display(), config::DATA_FILE_SUFFIX);
+        let pattern = format!("{}/*{}", self.path.display(), config::LOG_FILE_SUFFIX);
         trace!("read segment files with pattern: {}", &pattern);
         for path in glob(&pattern)? {
-            let segment = SegmentFile::new(path?.as_path(), false)?;
+            let segment = SegmentLogFile::new(path?.as_path(), false)?;
 
             self.stats.total_segment_files += 1;
             self.stats.size_of_all_segment_files += segment.size;
@@ -71,54 +71,77 @@ impl Store {
 
     fn build_keydir(&mut self) -> Result<()> {
         // TODO: build keydir from index file.
-        // fallback to original log file to rebuild keydir.
-        let mut segment_ids: Vec<_> = self.segments.keys().collect();
+        // fallback to the original log file to rebuild keydir.
+        let mut segment_ids = self.segments.keys().cloned().collect::<Vec<_>>();
         segment_ids.sort();
 
         for segment_id in segment_ids {
-            let segment = self.segments.get(segment_id).unwrap();
-            info!("build key dir from segment file {}", segment.path.display());
-            for entry in segment.entry_iter() {
-                if !entry.is_valid() {
-                    return Err(anyhow!("data entry was corrupted, current key is '{}', segment file id {}, offset {}", String::from_utf8_lossy(entry.key()), segment.id, entry.offset));
-                }
-
-                if entry.value() == config::REMOVE_TOMESTONE {
-                    self.stats.total_stale_entries += 1;
-                    self.stats.size_of_stale_entries += entry.size;
-                    self.stats.total_active_entries -= 1;
-
-                    if let Some(old_ent) = self.keydir.remove(entry.key()) {
-                        self.stats.size_of_stale_entries += old_ent.size;
-                        self.stats.total_stale_entries += 1;
-                    }
-                }
-
-                let keydir_ent = KeyDirEntry::new(
-                    segment_id.clone(),
-                    entry.offset,
-                    entry.size,
-                    entry.timestamp(),
-                );
-                let existed = self.keydir.get(entry.key());
-                match existed {
-                    None => {
-                        self.keydir.insert(entry.key().into(), keydir_ent);
-                        self.stats.total_active_entries += 1;
-                    }
-                    Some(existed_ent) => {
-                        if existed_ent.timestamp < entry.timestamp() {
-                            self.keydir.insert(entry.key().into(), keydir_ent);
-                        }
-                    }
-                }
+            let hint_file_path = segment_hint_file_path(&self.path, segment_id);
+            if hint_file_path.exists() {
+                self.build_keydir_from_hint_file(&hint_file_path)?;
+            } else {
+                self.build_keydir_from_log_file(segment_id)?;
             }
         }
+
+        // update stats.
+        self.stats.total_active_entries = self.keydir.len() as u64;
+
         info!(
             "build keydir done, got {} keys. current stats: {:?}",
             self.keydir.len(),
             self.stats
         );
+        Ok(())
+    }
+
+    fn build_keydir_from_hint_file(&mut self, path: &Path) -> Result<()> {
+        trace!("build keydir from segment hint file {}", path.display());
+        let mut hint_file = SegmentHintFile::new(path, false)?;
+        let hint_file_id = hint_file.id.clone();
+
+        for entry in hint_file.entry_iter() {
+            let keydir_ent =
+                KeyDirEntry::new(hint_file_id, entry.offset, entry.size, entry.timestamp);
+            self.keydir.insert(entry.key, keydir_ent);
+        }
+        Ok(())
+    }
+
+    fn build_keydir_from_log_file(&mut self, segment_id: u64) -> Result<()> {
+        let segment = self.segments.get(&segment_id).unwrap();
+        info!(
+            "build key dir from segment log file {}",
+            segment.path.display()
+        );
+        for entry in segment.entry_iter() {
+            if !entry.is_valid() {
+                return Err(anyhow!(
+                    "data entry was corrupted, current key is '{}', segment file id {}, offset {}",
+                    String::from_utf8_lossy(entry.key()),
+                    segment.id,
+                    entry.offset
+                ));
+            }
+
+            if entry.value() == config::REMOVE_TOMESTONE {
+                self.stats.total_stale_entries += 1;
+                self.stats.size_of_stale_entries += entry.size;
+
+                if let Some(old_ent) = self.keydir.remove(entry.key()) {
+                    self.stats.size_of_stale_entries += old_ent.size;
+                    self.stats.total_stale_entries += 1;
+                }
+            }
+
+            let keydir_ent = KeyDirEntry::new(
+                segment_id.clone(),
+                entry.offset,
+                entry.size,
+                entry.timestamp(),
+            );
+            self.keydir.insert(entry.key().into(), keydir_ent);
+        }
         Ok(())
     }
 
@@ -128,12 +151,12 @@ impl Store {
             segment_id.unwrap_or_else(|| self.segments.keys().max().unwrap_or(&0) + 1);
 
         // build data file path.
-        let p = segment_filename(&self.path, next_file_id);
+        let p = segment_log_file_path(&self.path, next_file_id);
         trace!("new segment data file at: {}", &p.display());
-        self.active_segment = Some(SegmentFile::new(p.as_path(), true)?);
+        self.active_segment = Some(SegmentLogFile::new(p.as_path(), true)?);
 
         // preapre a read-only segment file with the same path.
-        let segment = SegmentFile::new(p.as_path(), false)?;
+        let segment = SegmentLogFile::new(p.as_path(), false)?;
         self.segments.insert(segment.id, segment);
 
         self.stats.total_segment_files += 1;
@@ -191,7 +214,7 @@ impl Store {
                 .segments
                 .get_mut(&keydir_ent.segment_id)
                 .expect(format!("segment {} not found", &keydir_ent.segment_id).as_str());
-            let entry = segment.read(keydir_ent.offset).unwrap();
+            let entry = segment.read(keydir_ent.offset)?;
             if !entry.is_valid() {
                 return Err(anyhow!(
                     "data entry was corrupted, current key is '{}', segment file id {}, offset {}",
@@ -245,10 +268,15 @@ impl Store {
         self.new_active_segment(Some(compaction_segment_id + 1))?;
 
         // create a new segment file for compaction.
-        let p = segment_filename(&self.path, compaction_segment_id);
+        let log_file_path = segment_log_file_path(&self.path, compaction_segment_id);
 
-        trace!("create compaction segment file: {}", p.display());
-        let mut compaction_segment = SegmentFile::new(&p, true)?;
+        trace!("create compaction segment file: {}", log_file_path.display());
+        let mut compaction_segment = SegmentLogFile::new(&log_file_path, true)?;
+
+        // create a new segment hint file to store compaction file index.
+        let hint_file_path = segment_hint_file_path(&self.path, compaction_segment_id);
+        trace!("create compaction segment hint file: {}", hint_file_path.display());
+        let mut hint_file = SegmentHintFile::new(&hint_file_path, true)?;
 
         // copy all the data entries into compaction segment file.
         // TODO: check if segment file size exceeds threshold, switch
@@ -269,6 +297,8 @@ impl Store {
 
             keydir_ent.segment_id = compaction_segment.id;
             keydir_ent.offset = offset;
+
+            hint_file.write(key, keydir_ent.offset, keydir_ent.size, keydir_ent.timestamp)?;
         }
 
         compaction_segment.flush()?;
@@ -289,7 +319,7 @@ impl Store {
         // register read-only compaction segment.
         self.segments.insert(
             compaction_segment.id,
-            SegmentFile::new(&compaction_segment.path, false)?,
+            SegmentLogFile::new(&compaction_segment.path, false)?,
         );
 
         // update stats.
@@ -354,8 +384,16 @@ pub struct Stats {
     pub size_of_all_segment_files: u64,
 }
 
-fn segment_filename(dir: &Path, segment_id: u64) -> PathBuf {
+fn segment_log_file_path(dir: &Path, segment_id: u64) -> PathBuf {
+    segment_file_path(dir, segment_id, config::LOG_FILE_SUFFIX)
+}
+
+fn segment_hint_file_path(dir: &Path, segment_id: u64) -> PathBuf {
+    segment_file_path(dir, segment_id, config::HINT_FILE_SUFFIX)
+}
+
+fn segment_file_path(dir: &Path, segment_id: u64, suffix: &str) -> PathBuf {
     let mut p = dir.to_path_buf();
-    p.push(format!("{:012}{}", segment_id, config::DATA_FILE_SUFFIX));
+    p.push(format!("{:012}{}", segment_id, suffix));
     p
 }

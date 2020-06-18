@@ -5,7 +5,7 @@ use tinkv::{self, Store};
 fn main() -> tinkv::Result<()> {
     pretty_env_logger::init();
     let mut store = Store::open(".tinkv")?;
-    for i in 0..10 {
+    for i in 0..2 {
         let k = format!("key_{}", i);
         let v = format!("value_{}_{}", i, tinkv::util::current_timestamp());
         store.set(k.as_bytes(), v.as_bytes())?;
@@ -14,7 +14,7 @@ fn main() -> tinkv::Result<()> {
 
     println!("initial: {:?}", store.stats());
 
-    let v = store.get("key_1".as_bytes())?.unwrap();
+    let v = store.get("key_1".as_bytes())?.unwrap_or_default();
     println!("key_1 => {:?}", String::from_utf8_lossy(&v));
 
     store.set("hello".as_bytes(), "tinkv".as_bytes())?;
@@ -35,6 +35,12 @@ fn main() -> tinkv::Result<()> {
     let value_not_found = store.get("hello".as_bytes())?;
     assert_eq!(value_not_found, None);
     
+    store.compact()?;
+    println!("after compaction: {:?}", store.stats());
+
+    let v = store.get("key_1".as_bytes())?.unwrap();
+    println!("key_1 => {:?}", String::from_utf8_lossy(&v));
+
     store.compact()?;
     println!("after compaction: {:?}", store.stats());
 
