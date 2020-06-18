@@ -115,7 +115,7 @@ impl fmt::Display for Entry {
 
 /// DataFile represents a data log file.
 #[derive(Debug)]
-pub(crate) struct DataFile {
+pub(crate) struct DataFile<'a> {
     pub path: PathBuf,
     /// Data file id (12 digital characters).
     pub id: u64,
@@ -124,14 +124,16 @@ pub(crate) struct DataFile {
     writeable: bool,
     /// File handle of current data file for writting.
     /// Only writeable file can hold a writer.
-    writer: Option<BufWriterWithOffset<File>>,
+    writer: Option<BufWriterWithOffset<&'a File>>,
+    inner: Option<File>,
+
     /// File handle of current data file for reading.
     reader: BufReaderWithOffset<File>,
     /// Data file size.
     pub size: u64,
 }
 
-impl DataFile {
+impl<'a> DataFile<'a> {
     /// Create a new data file instance.
     /// It parses data id from file path, which wraps an optional
     /// writer (only for writeable segement file) and reader.
@@ -140,14 +142,15 @@ impl DataFile {
         let file_id = parse_file_id(path).expect("file id not found in file path");
 
         let mut w = None;
+        let mut inner = None;
         if writeable {
-            w = Some(BufWriterWithOffset::new(
-                fs::OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .append(true)
-                    .open(path)?,
-            )?);
+            let f = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .append(true)
+                .open(path)?;
+            w = Some(BufWriterWithOffset::new(&f)?);
+            inner = Some(f);
         }
 
         let file = fs::File::open(path)?;
@@ -158,6 +161,7 @@ impl DataFile {
             writeable,
             reader: BufReaderWithOffset::new(file)?,
             writer: w,
+            inner: inner,
             size: size,
         };
 
@@ -167,11 +171,7 @@ impl DataFile {
     /// Save key-value pair to segement file.
     pub(crate) fn write(&mut self, key: &[u8], value: &[u8], timestamp: u128) -> Result<Entry> {
         let inner = InnerEntry::new(key, value, timestamp);
-        trace!(
-            "append {} to segement file {}",
-            &inner,
-            self.path.display()
-        );
+        trace!("append {} to segement file {}", &inner, self.path.display());
         let encoded = bincode::serialize(&inner)?;
         let w = self
             .writer
@@ -245,8 +245,17 @@ impl DataFile {
         }
     }
 
+    /// Flush all pending writes to disk.
+    pub(crate) fn sync(&mut self) -> Result<()> {
+        self.flush()?;
+        if self.inner.is_some() {
+            self.inner.as_mut().unwrap().sync_all()?;
+        }
+        Ok(())
+    }
+
     /// Flush buf writer.
-    pub(crate) fn flush(&mut self) -> Result<()> {
+    fn flush(&mut self) -> Result<()> {
         if self.writeable {
             self.writer.as_mut().unwrap().flush()?;
         }
@@ -254,11 +263,11 @@ impl DataFile {
     }
 }
 
-impl Drop for DataFile {
+impl<'a> Drop for DataFile<'a> {
     fn drop(&mut self) {
-        if let Err(e) = self.flush() {
+        if let Err(e) = self.sync() {
             error!(
-                "failed to flush data file: {}, got error: {}",
+                "failed to sync data file: {}, got error: {}",
                 self.path.display(),
                 e
             );

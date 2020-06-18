@@ -1,7 +1,10 @@
 //! A simple key-value store.
 use crate::config;
 use crate::error::Result;
-use crate::{segment::{DataFile, HintFile}, util};
+use crate::{
+    segment::{DataFile, HintFile},
+    util,
+};
 use glob::glob;
 use log::{info, trace};
 use std::collections::{BTreeMap, HashMap};
@@ -15,23 +18,23 @@ use std::path::{Path, PathBuf};
 ///
 /// Key/value pairs are persisted in log files.
 #[derive(Debug)]
-pub struct Store {
+pub struct Store<'a> {
     // directory for database.
     path: PathBuf,
     // holds a bunch of data files.
-    data_files: HashMap<u64, DataFile>,
+    data_files: HashMap<u64, DataFile<'a>>,
     // only active data file is writeable.
-    active_data_file: Option<DataFile>,
+    active_data_file: Option<DataFile<'a>>,
     // keydir maintains key value index for fast query.
     keydir: BTreeMap<Vec<u8>, KeyDirEntry>,
     /// monitor tinkv store status, record statistics data.
     stats: Stats,
 }
 
-impl Store {
+impl<'a> Store<'a> {
     /// Initialize key value store with the given path.
     /// If the given path not found, a new one will be created.
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Store> {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         info!("open store path: {}", path.as_ref().display());
         create_dir_all(&path)?;
 
@@ -99,8 +102,7 @@ impl Store {
         let hint_file_id = hint_file.id.clone();
 
         for entry in hint_file.entry_iter() {
-            let keydir_ent =
-                KeyDirEntry::new(hint_file_id, entry.offset, entry.size);
+            let keydir_ent = KeyDirEntry::new(hint_file_id, entry.offset, entry.size);
             self.keydir.insert(entry.key, keydir_ent);
         }
         Ok(())
@@ -108,10 +110,7 @@ impl Store {
 
     fn build_keydir_from_log_file(&mut self, file_id: u64) -> Result<()> {
         let df = self.data_files.get(&file_id).unwrap();
-        info!(
-            "build key dir from data file {}",
-            df.path.display()
-        );
+        info!("build key dir from data file {}", df.path.display());
         for entry in df.entry_iter() {
             if !entry.is_valid() {
                 return Err(anyhow!(
@@ -132,11 +131,7 @@ impl Store {
                 }
             }
 
-            let keydir_ent = KeyDirEntry::new(
-                file_id.clone(),
-                entry.offset,
-                entry.size,
-            );
+            let keydir_ent = KeyDirEntry::new(file_id.clone(), entry.offset, entry.size);
             self.keydir.insert(entry.key().into(), keydir_ent);
         }
         Ok(())
@@ -174,10 +169,9 @@ impl Store {
         let ent = df.write(key, value, timestamp)?;
 
         // update key dir, the in-memory index.
-        let old = self.keydir.insert(
-            key.to_vec(),
-            KeyDirEntry::new(df.id, ent.offset, ent.size),
-        );
+        let old = self
+            .keydir
+            .insert(key.to_vec(), KeyDirEntry::new(df.id, ent.offset, ent.size));
 
         match old {
             None => {
@@ -268,18 +262,12 @@ impl Store {
         // create a new data file for compaction.
         let log_file_path = segment_log_file_path(&self.path, compaction_data_file_id);
 
-        trace!(
-            "create compaction data file: {}",
-            log_file_path.display()
-        );
-        let mut compaction_log_file = DataFile::new(&log_file_path, true)?;
+        trace!("create compaction data file: {}", log_file_path.display());
+        let mut compaction_df = DataFile::new(&log_file_path, true)?;
 
         // create a new hint file to store compaction file index.
         let hint_file_path = segment_hint_file_path(&self.path, compaction_data_file_id);
-        trace!(
-            "create compaction hint file: {}",
-            hint_file_path.display()
-        );
+        trace!("create compaction hint file: {}", hint_file_path.display());
         let mut hint_file = HintFile::new(&hint_file_path, true)?;
 
         // copy all the data entries into compaction data file.
@@ -294,33 +282,26 @@ impl Store {
                 "copy key '{}': original data file({}) -> compaction data file({})",
                 String::from_utf8_lossy(key),
                 df.path.display(),
-                compaction_log_file.path.display()
+                compaction_df.path.display()
             );
             let offset =
-                compaction_log_file.copy_bytes_from(df, keydir_ent.offset, keydir_ent.size)?;
+                compaction_df.copy_bytes_from(df, keydir_ent.offset, keydir_ent.size)?;
 
-            keydir_ent.segment_id = compaction_log_file.id;
+            keydir_ent.segment_id = compaction_df.id;
             keydir_ent.offset = offset;
 
-            hint_file.write(
-                key,
-                keydir_ent.offset,
-                keydir_ent.size,
-            )?;
+            hint_file.write(key, keydir_ent.offset, keydir_ent.size)?;
         }
 
-        compaction_log_file.flush()?;
-        hint_file.flush()?;
+        compaction_df.sync()?;
+        hint_file.sync()?;
 
         // remove stale segments.
         let mut stale_segment_count = 0;
         for df in self.data_files.values() {
             if df.id < compaction_data_file_id {
                 if df.path.exists() {
-                    trace!(
-                        "try to remove stale data file: {}",
-                        df.path.display()
-                    );
+                    trace!("try to remove stale data file: {}", df.path.display());
                     fs::remove_file(&df.path)?;
                 }
 
@@ -342,8 +323,8 @@ impl Store {
 
         // register read-only compaction data file.
         self.data_files.insert(
-            compaction_log_file.id,
-            DataFile::new(&compaction_log_file.path, false)?,
+            compaction_df.id,
+            DataFile::new(&compaction_df.path, false)?,
         );
 
         // update stats.
@@ -351,7 +332,7 @@ impl Store {
         self.stats.total_active_entries = self.keydir.len() as u64;
         self.stats.total_stale_entries = 0;
         self.stats.size_of_stale_entries = 0;
-        self.stats.size_of_all_data_files = compaction_log_file.size;
+        self.stats.size_of_all_data_files = compaction_df.size;
 
         Ok(())
     }
@@ -367,6 +348,26 @@ impl Store {
     /// Return current stats of storage engine.
     pub fn stats(&mut self) -> &Stats {
         &self.stats
+    }
+
+    /// Return all keys in data store.
+    pub fn keys(&self) -> impl Iterator<Item = &Vec<u8>>
+    {
+        self.keydir.keys()
+    }
+
+    /// Force any writes to disk.
+    pub fn sync(&mut self) -> Result<()> {
+        if self.active_data_file.is_some() {
+            self.active_data_file.as_mut().unwrap().sync()?;
+        }
+        Ok(())
+    }
+
+    /// Close a tinkv data store, flush all pending writes to disk.
+    pub fn close(&mut self) -> Result<()> {
+        self.sync()?;
+        Ok(())
     }
 }
 
@@ -386,7 +387,7 @@ impl KeyDirEntry {
         KeyDirEntry {
             segment_id,
             offset,
-            size
+            size,
         }
     }
 }

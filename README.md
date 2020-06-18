@@ -32,6 +32,17 @@ fn main() -> tinkv::Result<()> {
 }
 ```
 
+Public APIs of tinkv store are very easy to use:
+- `Store::open(path)`: Open a new or existing datastore. The directory must be writeable and readable for tinkv store.
+- `store.get(key)`: Get value by key from datastore.
+- `store.set(key, value)`: Store a key value pair into datastore.
+- `store.remove(key, value)`: Remove a key from datastore.
+- `store.compact()`: Merge data files into a more compact form. drop stale segments to release disk space. Produce hint files after compaction for faster startup.
+- `store.keys()`: Return all the keys in database.
+- `store.stas()`: Get current statistics of database.
+- `store.sync()`: Force any writes to datastore.
+- `store.close()`: Close datastore, sync all pending writes to disk.
+
 ## Client & Server
 ### REST APIs
 
