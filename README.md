@@ -65,6 +65,15 @@ fn main() -> tinkv::Result<()> {
 }
 ```
 
+# Structure of Data Directory
+
+```shell
+.tinkv
+├── 000000000001.tinkv.hint -- related index/hint file
+├── 000000000001.tinkv.log  -- immutable data file
+└── 000000000002.tinkv.log  -- active data file
+```
+
 # Refs
 
 I'm not familiar with erlang, but I found some implementations in other languages worth learning.
