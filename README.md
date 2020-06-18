@@ -58,7 +58,7 @@ $ RUST_LOG=trace cargo run --example basic
 `RUST_LOG` level can be one of [`trace`, `debug`, `info`, `error`].
 
 <details>
-    <summary>CLICK HERE | Output of example basic.</summary>
+    <summary>CLICK HERE | Example output.</summary>
 
 ```shell
 $ RUST_LOG=info cargo run --example basic
