@@ -2,6 +2,10 @@
 
 [TinKV](https://github.com/iFaceless/tinkv) is a simple and fast key-value storage engine written in Rust. Inspired by [basho/bitcask](https://github.com/basho/bitcask), written after attending the [Talent Plan courses](https://github.com/pingcap/talent-plan). 
 
+Notes:
+- *Do not use it in production.*
+- *Operations like set/remove/compact are not thread-safe.*
+
 Happy hacking~
 
 ![tinkv-overview.png](https://i.loli.net/2020/06/17/DW5JTEF4MlCsOLZ.png)
@@ -46,9 +50,8 @@ Public APIs of tinkv store are very easy to use:
 |`store.close()`| Close datastore, sync all pending writes to disk.|
 
 ## Client & Server
-### REST APIs
 
-### Redis-compatible protocol
+**Redis-compatible protocol?**
 
 **Note**: not all the redis commands are available, only a few of them are supported by tinkv.
 
@@ -58,12 +61,14 @@ Public APIs of tinkv store are very easy to use:
 
 # Compaction
 
-Compation process will be triggered if `size_of_stale_entries >= 10MB` after each call of `set/remove`. Compaction policy is very simple and easy to understand:
+Compation process will be triggered if `size_of_stale_entries >= config::COMPACTION_THRESHOLD` after each call of `set/remove`. Compaction steps are very simple and easy to understand:
 1. Freeze current active segment, and switch to another one.
 2. Create a compaction segment file, then iterate all the entries in `keydir` (in-memory hash table), copy related data entries into compaction file and update `keydir`.
 3. Remove all the stale segment files.
 
-You can call `Store::compact()` method to trigger compaction process if nessesary.
+Hint files (for fast startup) of corresponding data files will be generated after each compaction.
+
+You can call `store.compact()` method to trigger compaction process if nessesary.
 
 ```rust
 use pretty_env_logger;
@@ -82,9 +87,9 @@ fn main() -> tinkv::Result<()> {
 
 ```shell
 .tinkv
-├── 000000000001.tinkv.hint -- related index/hint file
-├── 000000000001.tinkv.log  -- immutable data file
-└── 000000000002.tinkv.log  -- active data file
+├── 000000000001.tinkv.hint -- related index/hint file, for fast startup
+├── 000000000001.tinkv.data  -- immutable data file
+└── 000000000002.tinkv.data  -- active data file
 ```
 
 # Refs
