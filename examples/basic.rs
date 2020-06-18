@@ -1,20 +1,28 @@
 use pretty_env_logger;
-
+use std::time;
 use tinkv::{self, Store};
 
 fn main() -> tinkv::Result<()> {
     pretty_env_logger::init_timed();
     let mut store = Store::open(".tinkv")?;
-    for i in 0..10 {
+
+    let begin = time::Instant::now();
+
+    const TOTAL_KEYS: usize = 100000;
+    for i in 0..TOTAL_KEYS {
         let k = format!("key_{}", i);
         let v = format!(
-            "value_{}_{}_the_remove command itself can be deleted in the next compaction",
+            "value_{}_{}_hello_world_this_is_a_bad_day",
             i,
             tinkv::util::current_timestamp()
         );
         store.set(k.as_bytes(), v.as_bytes())?;
         store.set(k.as_bytes(), v.as_bytes())?;
     }
+
+    let duration = time::Instant::now().duration_since(begin);
+    let speed = (TOTAL_KEYS * 2) as f32 / duration.as_secs_f32();
+    println!("{} keys written in {} secs, {} keys/s", TOTAL_KEYS * 2, duration.as_secs_f32(), speed);
 
     println!("initial: {:?}", store.stats());
 
