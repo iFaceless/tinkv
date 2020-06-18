@@ -49,6 +49,14 @@ Public APIs of tinkv store are very easy to use:
 |`store.sync()`| Force any writes to datastore.|
 |`store.close()`| Close datastore, sync all pending writes to disk.|
 
+### Run examples
+
+```shell
+$ RUST_LOG=trace cargo run --example basic
+```
+
+`RUST_LOG` level can be one of [`trace`, `debug`, `info`, `error`].
+
 ## Client & Server
 
 **Redis-compatible protocol?**
