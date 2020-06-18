@@ -1,5 +1,4 @@
-//! Segment file implementation.
-
+//! Maintain log files.
 use crate::error::Result;
 use crate::util::{checksum, parse_file_id, BufReaderWithOffset, BufWriterWithOffset};
 use anyhow::anyhow;
@@ -11,7 +10,7 @@ use std::io::{copy, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 /// Data entry definition.
-/// It will be serialized and saved to segment log file.
+/// It will be serialized and saved to data file.
 #[derive(Serialize, Deserialize, Debug)]
 struct InnerEntry {
     key: Vec<u8>,
@@ -83,35 +82,36 @@ impl Entry {
     }
 
     /// Return timestamp of the inner entry.
+    #[allow(dead_code)]
     pub(crate) fn timestamp(&self) -> u128 {
         self.inner.timestamp
     }
 }
 
-/// SegmentFile represents a data log file.
+/// DataFile represents a data log file.
 #[derive(Debug)]
-pub(crate) struct SegmentLogFile {
+pub(crate) struct DataFile {
     pub path: PathBuf,
-    /// Segment file id (12 digital characters).
+    /// Data file id (12 digital characters).
     pub id: u64,
-    /// Only one segment can be writeable at any time.
-    /// Mark current segment file can be writeable or not.
+    /// Only one data file can be writeable at any time.
+    /// Mark current data file can be writeable or not.
     writeable: bool,
-    /// File handle of current segment file for writting.
+    /// File handle of current data file for writting.
     /// Only writeable file can hold a writer.
     writer: Option<BufWriterWithOffset<File>>,
-    /// File handle of current segment file for reading.
+    /// File handle of current data file for reading.
     reader: BufReaderWithOffset<File>,
-    /// Segment file size.
+    /// Data file size.
     pub size: u64,
 }
 
-impl SegmentLogFile {
-    /// Create a new segment file instance.
-    /// It parses segment id from file path, which wraps an optional
+impl DataFile {
+    /// Create a new data file instance.
+    /// It parses data id from file path, which wraps an optional
     /// writer (only for writeable segement file) and reader.
     pub(crate) fn new(path: &Path, writeable: bool) -> Result<Self> {
-        // Segment name must starts with valid file id.
+        // Data name must starts with valid file id.
         let file_id = parse_file_id(path).expect("file id not found in file path");
 
         let mut w = None;
@@ -127,7 +127,7 @@ impl SegmentLogFile {
 
         let file = fs::File::open(path)?;
         let size = file.metadata()?.len();
-        let sf = SegmentLogFile {
+        let sf = DataFile {
             path: path.to_path_buf(),
             id: file_id,
             writeable,
@@ -151,7 +151,7 @@ impl SegmentLogFile {
         let w = self
             .writer
             .as_mut()
-            .ok_or(anyhow!("segment file is not writeable"))?;
+            .ok_or(anyhow!("data file is not writeable"))?;
         let offset = w.offset();
         w.write(&encoded)?;
         w.flush()?;
@@ -160,7 +160,7 @@ impl SegmentLogFile {
 
         let entry = Entry::new(inner, encoded.len() as u64, offset);
         trace!(
-            "successfully append {:?} to segment file {}",
+            "successfully append {:?} to data file {}",
             &entry,
             self.path.display()
         );
@@ -168,10 +168,10 @@ impl SegmentLogFile {
         Ok(entry)
     }
 
-    /// Read key value in segment file.
+    /// Read key value in data file.
     pub(crate) fn read(&mut self, offset: u64) -> Result<Entry> {
         trace!(
-            "read key value with offset {} in segment file {}",
+            "read key value with offset {} in data file {}",
             offset,
             self.path.display()
         );
@@ -182,18 +182,18 @@ impl SegmentLogFile {
 
         let entry = Entry::new(inner, self.reader.offset() - offset, offset);
         trace!(
-            "successfully read {:?} from segment log file {}",
+            "successfully read {:?} from data log file {}",
             &entry,
             self.path.display()
         );
         Ok(entry)
     }
 
-    /// Copy `size` bytes from `src` segment file.
+    /// Copy `size` bytes from `src` data file.
     /// Return offset of the newly written entry
     pub(crate) fn copy_bytes_from(
         &mut self,
-        src: &mut SegmentLogFile,
+        src: &mut DataFile,
         offset: u64,
         size: u64,
     ) -> Result<u64> {
@@ -203,7 +203,7 @@ impl SegmentLogFile {
         }
 
         let mut r = reader.take(size);
-        let w = self.writer.as_mut().expect("segment log file is not writeable");
+        let w = self.writer.as_mut().expect("data file is not writeable");
         let offset = w.offset();
 
         let num_bytes = copy(&mut r, w)?;
@@ -229,11 +229,11 @@ impl SegmentLogFile {
     }
 }
 
-impl Drop for SegmentLogFile {
+impl Drop for DataFile {
     fn drop(&mut self) {
         if let Err(e) = self.flush() {
             error!(
-                "failed to flush segment log file: {}, got error: {}",
+                "failed to flush data file: {}, got error: {}",
                 self.path.display(),
                 e
             );
@@ -242,7 +242,7 @@ impl Drop for SegmentLogFile {
         // auto clean up if file size is zero.
         if self.writeable && self.size == 0 && fs::remove_file(self.path.as_path()).is_ok() {
             trace!(
-                "segment log file '{}' is empty, remove it.",
+                "data file '{}' is empty, remove it.",
                 self.path.display()
             );
         }
@@ -266,7 +266,7 @@ impl Iterator for EntryIter {
         let entry = Entry::new(inner, new_offset - offset, offset);
 
         trace!(
-            "successfully read entry {:?} from segment log file {}",
+            "successfully read entry {:?} from data file {}",
             &entry,
             self.path.display()
         );

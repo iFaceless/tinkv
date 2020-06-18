@@ -34,11 +34,7 @@ fn main() -> tinkv::Result<()> {
 
     let value_not_found = store.get("hello".as_bytes())?;
     assert_eq!(value_not_found, None);
-<<<<<<< HEAD
-    
-=======
 
->>>>>>> 31cdccf4da1540c5120f26e3981d6eec2fd5396a
     store.compact()?;
     println!("after compaction: {:?}", store.stats());
 
