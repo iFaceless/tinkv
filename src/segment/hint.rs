@@ -82,7 +82,7 @@ impl HintFile {
             size,
         };
         trace!(
-            "append hint entry: {:?} to file {}",
+            "append {} to file {}",
             &entry,
             self.path.display()
         );

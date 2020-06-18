@@ -5,6 +5,7 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
 use log::{error, trace};
+use std::fmt;
 use std::fs::{self, File};
 use std::io::{copy, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -46,6 +47,17 @@ impl InnerEntry {
     }
 }
 
+impl fmt::Display for InnerEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "DataInnerEntry(key='{}', timestamp={}, checksum={})",
+            String::from_utf8_lossy(self.key.as_ref()),
+            self.timestamp,
+            self.checksum,
+        )
+    }
+}
 /// An entry wrapper with size and offset.
 #[derive(Debug)]
 pub(crate) struct Entry {
@@ -85,6 +97,19 @@ impl Entry {
     #[allow(dead_code)]
     pub(crate) fn timestamp(&self) -> u128 {
         self.inner.timestamp
+    }
+}
+
+impl fmt::Display for Entry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "DataEntry(key='{}', offset={}, size={}, timestamp={})",
+            String::from_utf8_lossy(self.key().as_ref()),
+            self.offset,
+            self.size,
+            self.timestamp(),
+        )
     }
 }
 
@@ -143,7 +168,7 @@ impl DataFile {
     pub(crate) fn write(&mut self, key: &[u8], value: &[u8], timestamp: u128) -> Result<Entry> {
         let inner = InnerEntry::new(key, value, timestamp);
         trace!(
-            "append entry {:?} to segement file {}",
+            "append {} to segement file {}",
             &inner,
             self.path.display()
         );
@@ -155,12 +180,12 @@ impl DataFile {
         let offset = w.offset();
         w.write(&encoded)?;
         w.flush()?;
-        
+
         self.size = offset + encoded.len() as u64;
 
         let entry = Entry::new(inner, encoded.len() as u64, offset);
         trace!(
-            "successfully append {:?} to data file {}",
+            "successfully append {} to data file {}",
             &entry,
             self.path.display()
         );
@@ -182,7 +207,7 @@ impl DataFile {
 
         let entry = Entry::new(inner, self.reader.offset() - offset, offset);
         trace!(
-            "successfully read {:?} from data log file {}",
+            "successfully read {} from data log file {}",
             &entry,
             self.path.display()
         );
@@ -241,10 +266,7 @@ impl Drop for DataFile {
 
         // auto clean up if file size is zero.
         if self.writeable && self.size == 0 && fs::remove_file(self.path.as_path()).is_ok() {
-            trace!(
-                "data file '{}' is empty, remove it.",
-                self.path.display()
-            );
+            trace!("data file '{}' is empty, remove it.", self.path.display());
         }
     }
 }
@@ -266,7 +288,7 @@ impl Iterator for EntryIter {
         let entry = Entry::new(inner, new_offset - offset, offset);
 
         trace!(
-            "successfully read entry {:?} from data file {}",
+            "iter read {} from data file {}",
             &entry,
             self.path.display()
         );
