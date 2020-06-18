@@ -1,33 +1,39 @@
-[package]
-name = "tinkv"
-version = "0.2.0"
-authors = ["0xE8551CCB <noti@ifaceless.space>"]
-edition = "2018"
-description = "A simple key-value store"
-keywords = ["database", "key-value"]
-categories = ["Development"]
-license = "MIT"
+[[example]]
+name = 'basic'
+path = 'examples/basic.rs'
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package]
+name = 'tinkv'
+version = '0.3.0'
+authors = ['0xE8551CCB <noti@ifaceless.space>']
+edition = '2018'
+description = 'A fast and simple key-value storage engine.'
+keywords = [
+    'database',
+    'key-value',
+    'storage',
+]
+categories = ['Development']
+license = 'MIT'
+
 [dependencies]
-clap = "2.33.1"
-structopt = "0.3.14"
-serde = {version = "1.0.111", features = ["derive"]}
-thiserror = "1.0.19"
-anyhow = "1.0.31"
-crc = "1.8.1"
-glob = "0.3.0"
-log = "0.4.8"
-pretty_env_logger = "0.4.0"
-impls = "1.0.3"
-bincode = "1.2.1"
+clap = '2.33.1'
+structopt = '0.3.14'
+thiserror = '1.0.19'
+anyhow = '1.0.31'
+crc = '1.8.1'
+glob = '0.3.0'
+log = '0.4.8'
+pretty_env_logger = '0.4.0'
+impls = '1.0.3'
+bincode = '1.2.1'
+
+[dependencies.serde]
+version = '1.0.111'
+features = ['derive']
 
 [dev-dependencies]
-assert_cmd = "0.11.0"
-predicates = "1.0.0"
-tempfile = "3.1.0"
-walkdir = "2.3.1"
-
-[[example]]
-name = "basic"
-path = "examples/basic.rs"
+assert_cmd = '0.11.0'
+predicates = '1.0.0'
+tempfile = '3.1.0'
+walkdir = '2.3.1'
