@@ -1,7 +1,6 @@
-//! Maintain log files.
-use crate::error::Result;
+//! Maintain data files.
+use crate::error::{Result, TinkvError};
 use crate::util::{checksum, parse_file_id, BufReaderWithOffset, FileWithBufWriter};
-use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
 use log::{error, trace};
@@ -62,9 +61,9 @@ impl fmt::Display for InnerEntry {
 #[derive(Debug)]
 pub(crate) struct Entry {
     inner: InnerEntry,
-    // size of inner entry in log file.
+    // size of inner entry in data file.
     pub size: u64,
-    // position of inner entry in log file.
+    // position of inner entry in data file.
     pub offset: u64,
 }
 
@@ -113,7 +112,7 @@ impl fmt::Display for Entry {
     }
 }
 
-/// DataFile represents a data log file.
+/// DataFile represents a data file.
 #[derive(Debug)]
 pub(crate) struct DataFile {
     pub path: PathBuf,
@@ -168,11 +167,13 @@ impl DataFile {
     pub(crate) fn write(&mut self, key: &[u8], value: &[u8], timestamp: u128) -> Result<Entry> {
         let inner = InnerEntry::new(key, value, timestamp);
         trace!("append {} to segement file {}", &inner, self.path.display());
+        // avoid immutable borrowing issue.
+        let path = self.path.as_path();
         let encoded = bincode::serialize(&inner)?;
         let w = self
             .writer
             .as_mut()
-            .ok_or(anyhow!("data file is not writeable"))?;
+            .ok_or_else(|| TinkvError::FileNotWriteable(path.to_path_buf()))?;
         let offset = w.offset();
         w.write(&encoded)?;
         w.flush()?;

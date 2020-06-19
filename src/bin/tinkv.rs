@@ -45,6 +45,6 @@ fn main() -> tinkv::Result<()> {
 
     let v = store.get("key_1".as_bytes())?.unwrap();
     println!("key_1 => {:?}", String::from_utf8_lossy(&v));
-    
+
     Ok(())
 }
