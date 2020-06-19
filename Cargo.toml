@@ -2,9 +2,13 @@
 name = 'basic'
 path = 'examples/basic.rs'
 
+[[example]]
+name = 'hello'
+path = 'examples/hello.rs'
+
 [package]
 name = 'tinkv'
-version = '0.3.0'
+version = '0.4.0'
 authors = ['0xE8551CCB <noti@ifaceless.space>']
 edition = '2018'
 description = 'A fast and simple key-value storage engine.'

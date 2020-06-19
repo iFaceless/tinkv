@@ -36,10 +36,30 @@ fn main() -> tinkv::Result<()> {
 }
 ```
 
+### Open with custom options
+
+```rust
+use pretty_env_logger;
+use tinkv::{self, Store};
+
+fn main() -> tinkv::Result<()> {
+    let mut store = tinkv::OpenOptions::new()
+        .max_data_file_size(1024 * 1024)
+        .max_key_size(128)
+        .max_value_size(128)
+        .sync(true)
+        .open(".tinkv")?;
+    store.set("hello".as_bytes(), "world".as_bytes())?;
+    Ok(())
+}
+```
+
+### APIs
 Public APIs of tinkv store are very easy to use:
 | API                      |                   Description                                 |
 |--------------------------|---------------------------------------------------------------|
 |`Store::open(path)`       | Open a new or existing datastore. The directory must be writeable and readable for tinkv store.|`
+|`tinkv::OpenOptions()`    | Open a new or existing datastore with custom options. |
 |`store.get(key)`          | Get value by key from datastore.|
 |`store.set(key, value)`   | Store a key value pair into datastore.|
 |`store.remove(key, value)`| Remove a key from datastore.|

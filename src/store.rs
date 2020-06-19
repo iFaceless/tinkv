@@ -2,7 +2,7 @@
 use crate::config;
 use crate::error::{Result, TinkvError};
 use crate::{
-    segment::{DataFile, HintFile},
+    segment::{DataEntry, DataFile, HintFile},
     util,
 };
 use glob::glob;
@@ -28,21 +28,28 @@ pub struct Store {
     keydir: BTreeMap<Vec<u8>, KeyDirEntry>,
     /// monitor tinkv store status, record statistics data.
     stats: Stats,
+    /// store config.
+    config: Config,
 }
 
 impl Store {
     /// Initialize key value store with the given path.
     /// If the given path not found, a new one will be created.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Self::open_with_options(path, Config::default())
+    }
+
+    /// Open datasotre directory with custom options.
+    fn open_with_options<P: AsRef<Path>>(path: P, config: Config) -> Result<Self> {
         info!("open store path: {}", path.as_ref().display());
         create_dir_all(&path)?;
-
         let mut store = Store {
             path: path.as_ref().to_path_buf(),
             data_files: HashMap::new(),
             active_data_file: None,
             keydir: BTreeMap::new(),
             stats: Stats::default(),
+            config,
         };
 
         store.open_data_files()?;
@@ -156,20 +163,22 @@ impl Store {
 
     /// Save key & value pair to database.
     pub fn set(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
-        // we'are sure that active data file has been prepared.
-        let df = self
-            .active_data_file
-            .as_mut()
-            .expect("active data file not found");
-        let timestamp = util::current_timestamp();
+        if key.len() as u64 > self.config.max_key_size {
+            return Err(TinkvError::KeyIsTooLarge);
+        }
+
+        if value.len() as u64 > self.config.max_value_size {
+            return Err(TinkvError::ValueIsTooLarge);
+        }
 
         // save data to data file.
-        let ent = df.write(key, value, timestamp)?;
+        let ent = self.write(key, value)?;
 
         // update key dir, the in-memory index.
-        let old = self
-            .keydir
-            .insert(key.to_vec(), KeyDirEntry::new(df.id, ent.offset, ent.size));
+        let old = self.keydir.insert(
+            key.to_vec(),
+            KeyDirEntry::new(ent.file_id, ent.offset, ent.size),
+        );
 
         match old {
             None => {
@@ -183,12 +192,43 @@ impl Store {
 
         self.stats.size_of_all_data_files += ent.size;
 
-        if self.stats.size_of_stale_entries > config::COMPATION_THRESHOLD {
-            // TODO: trigger compaction asynchrously.
-            self.compact()?;
+        Ok(())
+    }
+
+    /// Remove key value from database.
+    pub fn remove(&mut self, key: &[u8]) -> Result<()> {
+        if self.keydir.contains_key(key) {
+            // write tomestone, will be removed on compaction.
+            let entry = self.write(key, config::REMOVE_TOMESTONE)?;
+            // remove key from in-memory index.
+            let old = self.keydir.remove(key).expect("key not found");
+
+            self.stats.total_active_entries -= 1;
+            self.stats.total_stale_entries += 1;
+            self.stats.size_of_all_data_files += entry.size;
+            self.stats.size_of_stale_entries += old.size + entry.size;
+
+            Ok(())
+        } else {
+            Err(TinkvError::KeyNotFound(key.into()))
+        }
+    }
+
+    fn write(&mut self, key: &[u8], value: &[u8]) -> Result<DataEntry> {
+        let df = self
+            .active_data_file
+            .as_mut()
+            .expect("active data file not found");
+        // TODO: check file size, switch to another one if nessesary.
+        let timestamp = util::current_timestamp();
+        let entry = df.write(key, value, timestamp)?;
+
+        if self.config.sync {
+            // make sure data entry is persisted in storage.
+            df.sync()?;
         }
 
-        Ok(())
+        Ok(entry)
     }
 
     /// Get key value from database.
@@ -217,38 +257,12 @@ impl Store {
         }
     }
 
-    /// Remove key value from database.
-    pub fn remove(&mut self, key: &[u8]) -> Result<()> {
-        if self.keydir.contains_key(key) {
-            let df = self
-                .active_data_file
-                .as_mut()
-                .expect("active data file not found");
-            let timestamp = util::current_timestamp();
-            // write tomestone, will be removed on compaction.
-            let entry = df.write(key, config::REMOVE_TOMESTONE, timestamp)?;
-            // remove key from in-memory index.
-            let old = self.keydir.remove(key).expect("key not found");
-
-            self.stats.total_active_entries -= 1;
-            self.stats.total_stale_entries += 1;
-            self.stats.size_of_all_data_files += entry.size;
-            self.stats.size_of_stale_entries += old.size + entry.size;
-
-            if self.stats.size_of_stale_entries > config::COMPATION_THRESHOLD {
-                // TODO: trigger compaction asynchrously.
-                self.compact()?;
-            }
-
-            Ok(())
-        } else {
-            Err(TinkvError::KeyNotFound(key.into()))
-        }
-    }
-
     /// Clear stale entries from data files and reclaim disk space.
     pub fn compact(&mut self) -> Result<()> {
-        info!("there are {} data files need to be compacted", self.data_files.len());
+        info!(
+            "there are {} data files need to be compacted",
+            self.data_files.len()
+        );
         let compaction_data_file_id = self.next_file_id();
         // switch to another active data file.
         self.new_active_data_file(Some(compaction_data_file_id + 1))?;
@@ -418,4 +432,69 @@ fn segment_file_path(dir: &Path, segment_id: u64, suffix: &str) -> PathBuf {
     let mut p = dir.to_path_buf();
     p.push(format!("{:012}{}", segment_id, suffix));
     p
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Config {
+    max_data_file_size: u64,
+    max_key_size: u64,
+    max_value_size: u64,
+    // sync data to storage after each writting operation.
+    // we should balance data reliability and writting performance.
+    sync: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            max_data_file_size: config::DEFAULT_MAX_DATA_FILE_SIZE,
+            max_key_size: config::DEFAULT_MAX_KEY_SIZE,
+            max_value_size: config::DEFAULT_MAX_VALUE_SIZE,
+            sync: false,
+        }
+    }
+}
+
+/// Build custom open options.
+#[derive(Debug)]
+pub struct OpenOptions {
+    config: Config,
+}
+
+impl OpenOptions {
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        Self {
+            config: Config::default(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn max_data_file_size(&mut self, value: u64) -> &mut Self {
+        self.config.max_data_file_size = value;
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn max_key_size(&mut self, value: u64) -> &mut Self {
+        self.config.max_key_size = value;
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn max_value_size(&mut self, value: u64) -> &mut Self {
+        self.config.max_value_size = value;
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn sync(&mut self, value: bool) -> &mut Self {
+        self.config.sync = value;
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn open<P: AsRef<Path>>(&self, path: P) -> Result<Store> {
+        Store::open_with_options(path, self.config.clone())
+    }
 }
