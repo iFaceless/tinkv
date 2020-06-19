@@ -1,6 +1,5 @@
 //! TinKV command line app.
 use pretty_env_logger;
-
 use tinkv::{self, Store};
 
 fn main() -> tinkv::Result<()> {

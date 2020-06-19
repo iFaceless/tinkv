@@ -29,6 +29,10 @@ pub enum TinkvError {
     KeyNotFound(Vec<u8>),
     #[error("file '{}' is not writeable", .0.display())]
     FileNotWriteable(PathBuf),
+    #[error("key is too large")]
+    KeyIsTooLarge,
+    #[error("value is too large")]
+    ValueIsTooLarge,
     #[error("{}", .0)]
     Custom(String),
     #[error(transparent)]

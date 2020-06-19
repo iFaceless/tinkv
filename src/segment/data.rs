@@ -65,15 +65,18 @@ pub(crate) struct Entry {
     pub size: u64,
     // position of inner entry in data file.
     pub offset: u64,
+    // related data file id.
+    pub file_id: u64,
 }
 
 impl Entry {
     /// Create a new entry instance with size and offset.
-    fn new(inner: InnerEntry, size: u64, offset: u64) -> Self {
+    fn new(file_id: u64, inner: InnerEntry, size: u64, offset: u64) -> Self {
         Self {
             inner,
             size,
             offset,
+            file_id,
         }
     }
 
@@ -103,7 +106,8 @@ impl fmt::Display for Entry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "DataEntry(key='{}', offset={}, size={}, timestamp={})",
+            "DataEntry(file_id={}, key='{}', offset={}, size={}, timestamp={})",
+            self.file_id,
             String::from_utf8_lossy(self.key().as_ref()),
             self.offset,
             self.size,
@@ -180,7 +184,7 @@ impl DataFile {
 
         self.size = offset + encoded.len() as u64;
 
-        let entry = Entry::new(inner, encoded.len() as u64, offset);
+        let entry = Entry::new(self.id, inner, encoded.len() as u64, offset);
         trace!(
             "successfully append {} to data file {}",
             &entry,
@@ -202,7 +206,7 @@ impl DataFile {
         reader.seek(SeekFrom::Start(offset))?;
         let inner: InnerEntry = bincode::deserialize_from(reader)?;
 
-        let entry = Entry::new(inner, self.reader.offset() - offset, offset);
+        let entry = Entry::new(self.id, inner, self.reader.offset() - offset, offset);
         trace!(
             "successfully read {} from data log file {}",
             &entry,
@@ -236,9 +240,11 @@ impl DataFile {
 
     /// Return an entry iterator.
     pub(crate) fn entry_iter(&self) -> EntryIter {
+        // TODO: refactor entry iter.
         EntryIter {
             path: self.path.clone(),
             reader: fs::File::open(self.path.clone()).unwrap(),
+            file_id: self.id,
         }
     }
 
@@ -277,10 +283,12 @@ impl Drop for DataFile {
     }
 }
 
+/// An iterator over a data file, return data entries.
 #[derive(Debug)]
 pub(crate) struct EntryIter {
     path: PathBuf,
     reader: fs::File,
+    file_id: u64,
 }
 
 impl Iterator for EntryIter {
@@ -291,7 +299,7 @@ impl Iterator for EntryIter {
         let inner: InnerEntry = bincode::deserialize_from(&self.reader).ok()?;
         let new_offset = self.reader.seek(SeekFrom::Current(0)).unwrap();
 
-        let entry = Entry::new(inner, new_offset - offset, offset);
+        let entry = Entry::new(self.file_id, inner, new_offset - offset, offset);
 
         trace!(
             "iter read {} from data file {}",

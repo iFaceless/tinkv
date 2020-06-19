@@ -6,4 +6,4 @@ mod store;
 pub mod util;
 
 pub use error::{Result, TinkvError};
-pub use store::Store;
+pub use store::{OpenOptions, Store};
