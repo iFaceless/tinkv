@@ -1,6 +1,6 @@
 //! A simple key-value store.
 use crate::config;
-use crate::error::Result;
+use crate::error::{Result, TinkvError};
 use crate::{
     segment::{DataFile, HintFile},
     util,
@@ -11,12 +11,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::fs::create_dir_all;
 
-use anyhow::anyhow;
 use std::path::{Path, PathBuf};
 
 /// The `Store` stores key/value pairs.
 ///
-/// Key/value pairs are persisted in log files.
+/// Key/value pairs are persisted in data files.
 #[derive(Debug)]
 pub struct Store {
     // directory for database.
@@ -55,7 +54,7 @@ impl Store {
 
     /// Open data files (they are immutable).
     fn open_data_files(&mut self) -> Result<()> {
-        let pattern = format!("{}/*{}", self.path.display(), config::LOG_FILE_SUFFIX);
+        let pattern = format!("{}/*{}", self.path.display(), config::DATA_FILE_SUFFIX);
         trace!("read data files with pattern: {}", &pattern);
         for path in glob(&pattern)? {
             let df = DataFile::new(path?.as_path(), false)?;
@@ -72,7 +71,7 @@ impl Store {
 
     fn build_keydir(&mut self) -> Result<()> {
         // TODO: build keydir from index file.
-        // fallback to the original log file to rebuild keydir.
+        // fallback to the original data file to rebuild keydir.
         let mut file_ids = self.data_files.keys().cloned().collect::<Vec<_>>();
         file_ids.sort();
 
@@ -81,7 +80,7 @@ impl Store {
             if hint_file_path.exists() {
                 self.build_keydir_from_hint_file(&hint_file_path)?;
             } else {
-                self.build_keydir_from_log_file(file_id)?;
+                self.build_keydir_from_data_file(file_id)?;
             }
         }
 
@@ -108,17 +107,16 @@ impl Store {
         Ok(())
     }
 
-    fn build_keydir_from_log_file(&mut self, file_id: u64) -> Result<()> {
+    fn build_keydir_from_data_file(&mut self, file_id: u64) -> Result<()> {
         let df = self.data_files.get(&file_id).unwrap();
         info!("build key dir from data file {}", df.path.display());
         for entry in df.entry_iter() {
             if !entry.is_valid() {
-                return Err(anyhow!(
-                    "data entry was corrupted, current key is '{}', data file id {}, offset {}",
-                    String::from_utf8_lossy(entry.key()),
-                    df.id,
-                    entry.offset
-                ));
+                return Err(TinkvError::DataEntryCorrupted {
+                    file_id: df.id,
+                    key: entry.key().into(),
+                    offset: entry.offset,
+                });
             }
 
             if entry.value() == config::REMOVE_TOMESTONE {
@@ -143,7 +141,7 @@ impl Store {
             file_id.unwrap_or_else(|| self.data_files.keys().max().unwrap_or(&0) + 1);
 
         // build data file path.
-        let p = segment_log_file_path(&self.path, next_file_id);
+        let p = segment_data_file_path(&self.path, next_file_id);
         trace!("new data file at: {}", &p.display());
         self.active_data_file = Some(DataFile::new(p.as_path(), true)?);
 
@@ -165,7 +163,7 @@ impl Store {
             .expect("active data file not found");
         let timestamp = util::current_timestamp();
 
-        // save data to log file.
+        // save data to data file.
         let ent = df.write(key, value, timestamp)?;
 
         // update key dir, the in-memory index.
@@ -207,12 +205,11 @@ impl Store {
                 .expect(format!("data file {} not found", &keydir_ent.segment_id).as_str());
             let entry = df.read(keydir_ent.offset)?;
             if !entry.is_valid() {
-                return Err(anyhow!(
-                    "data entry was corrupted, current key is '{}', data file id {}, offset {}",
-                    String::from_utf8_lossy(key),
-                    df.id,
-                    keydir_ent.offset
-                ));
+                return Err(TinkvError::DataEntryCorrupted {
+                    file_id: df.id,
+                    key: entry.key().into(),
+                    offset: entry.offset,
+                });
             }
             return Ok(Some(entry.value().into()));
         } else {
@@ -245,25 +242,22 @@ impl Store {
 
             Ok(())
         } else {
-            Err(anyhow!(
-                "key '{}' not found in database",
-                String::from_utf8_lossy(key)
-            ))
+            Err(TinkvError::KeyNotFound(key.into()))
         }
     }
 
-    /// Clear staled entries from data files and reclaim disk space.
+    /// Clear stale entries from data files and reclaim disk space.
     pub fn compact(&mut self) -> Result<()> {
-        info!("compact {} data files", self.data_files.len());
+        info!("there are {} data files need to be compacted", self.data_files.len());
         let compaction_data_file_id = self.next_file_id();
         // switch to another active data file.
         self.new_active_data_file(Some(compaction_data_file_id + 1))?;
 
         // create a new data file for compaction.
-        let log_file_path = segment_log_file_path(&self.path, compaction_data_file_id);
+        let data_file_path = segment_data_file_path(&self.path, compaction_data_file_id);
 
-        trace!("create compaction data file: {}", log_file_path.display());
-        let mut compaction_df = DataFile::new(&log_file_path, true)?;
+        trace!("create compaction data file: {}", data_file_path.display());
+        let mut compaction_df = DataFile::new(&data_file_path, true)?;
 
         // create a new hint file to store compaction file index.
         let hint_file_path = segment_hint_file_path(&self.path, compaction_data_file_id);
@@ -369,7 +363,7 @@ impl Store {
 }
 
 impl Drop for Store {
-    fn drop(&mut self) { 
+    fn drop(&mut self) {
         // ignore sync errors.
         trace!("sync all pending writes to disk.");
         let _r = self.sync();
@@ -399,10 +393,10 @@ impl KeyDirEntry {
 
 #[derive(Debug, Copy, Clone, Default)]
 pub struct Stats {
-    /// size (bytes) of stale entries in log files, which can be
+    /// size (bytes) of stale entries in data files, which can be
     /// deleted after a compaction.
     pub size_of_stale_entries: u64,
-    /// total stale entries in log files.
+    /// total stale entries in data files.
     pub total_stale_entries: u64,
     /// total active key value pairs in database.
     pub total_active_entries: u64,
@@ -412,8 +406,8 @@ pub struct Stats {
     pub size_of_all_data_files: u64,
 }
 
-fn segment_log_file_path(dir: &Path, segment_id: u64) -> PathBuf {
-    segment_file_path(dir, segment_id, config::LOG_FILE_SUFFIX)
+fn segment_data_file_path(dir: &Path, segment_id: u64) -> PathBuf {
+    segment_file_path(dir, segment_id, config::DATA_FILE_SUFFIX)
 }
 
 fn segment_hint_file_path(dir: &Path, segment_id: u64) -> PathBuf {

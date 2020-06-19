@@ -22,7 +22,12 @@ fn main() -> tinkv::Result<()> {
 
     let duration = time::Instant::now().duration_since(begin);
     let speed = (TOTAL_KEYS * 2) as f32 / duration.as_secs_f32();
-    println!("{} keys written in {} secs, {} keys/s", TOTAL_KEYS * 2, duration.as_secs_f32(), speed);
+    println!(
+        "{} keys written in {} secs, {} keys/s",
+        TOTAL_KEYS * 2,
+        duration.as_secs_f32(),
+        speed
+    );
 
     println!("initial: {:?}", store.stats());
 
@@ -52,6 +57,6 @@ fn main() -> tinkv::Result<()> {
 
     let v = store.get("key_1".as_bytes())?.unwrap();
     println!("key_1 => {:?}", String::from_utf8_lossy(&v));
-    
+
     Ok(())
 }

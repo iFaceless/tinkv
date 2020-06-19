@@ -1,4 +1,4 @@
-//! Maintain hint files. Each compacted log file
+//! Maintain hint files. Each compacted data file
 //! should bind with a hint file for faster loading.
 use crate::error::Result;
 use crate::util::{parse_file_id, FileWithBufWriter};
@@ -49,14 +49,14 @@ impl HintFile {
         // File name must starts with valid file id.
         let file_id = parse_file_id(path).expect("file id not found in file path");
 
-        let mut w= None;
+        let mut w = None;
         if writeable {
             let f = fs::OpenOptions::new()
                 .create(true)
                 .write(true)
                 .append(true)
                 .open(path)?;
-                
+
             w = Some(FileWithBufWriter::from(f)?);
         }
 
