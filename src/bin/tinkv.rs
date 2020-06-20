@@ -1,49 +1,160 @@
 //! TinKV command line app.
+use bytefmt;
+use clap_verbosity_flag;
 use pretty_env_logger;
+use std::path::PathBuf;
+use std::process;
+use structopt::{self, StructOpt};
 use tinkv::{self, Store};
 
-fn main() -> tinkv::Result<()> {
-    pretty_env_logger::init_timed();
-    let mut store = Store::open(".tinkv")?;
-    for i in 0..10 {
-        let k = format!("key_{}", i);
-        let v = format!(
-            "value_{}_{}_the_remove command itself can be deleted in the next compaction",
-            i,
-            tinkv::util::current_timestamp()
-        );
-        store.set(k.as_bytes(), v.as_bytes())?;
-        store.set(k.as_bytes(), v.as_bytes())?;
+#[derive(Debug, StructOpt)]
+enum SubCommand {
+    /// Retrive value of a key, and display the value.
+    Get { key: String },
+    /// Store a key value pair into datastore.
+    Set { key: String, value: String },
+    #[structopt(name = "del")]
+    /// Delete a key value pair from datastore.
+    Delete { key: String },
+    /// List all keys in datastore.
+    Keys,
+    /// Perform a prefix scanning for keys.
+    Scan { prefix: String },
+    /// Compact data files in datastore and reclaim disk space.
+    Compact,
+    /// Display statistics of the datastore.
+    Stats,
+}
+
+#[derive(Debug, StructOpt)]
+#[structopt(
+    rename_all = "kebab-case", 
+    name = env!("CARGO_PKG_NAME"),
+    version = env!("CARGO_PKG_VERSION"),
+    author = env!("CARGO_PKG_AUTHORS"),
+    about = env!("CARGO_PKG_DESCRIPTION"),
+)]
+struct Opt {
+    #[structopt(flatten)]
+    verbose: clap_verbosity_flag::Verbosity,
+    /// Path to tinkv datastore.
+    #[structopt(parse(from_os_str))]
+    path: PathBuf,
+    #[structopt(subcommand)]
+    cmd: SubCommand,
+}
+
+fn main() {
+    let opt = Opt::from_args();
+    if let Some(level) = opt.verbose.log_level() {
+        std::env::set_var("RUST_LOG", format!("{}", level));
     }
 
-    println!("initial: {:?}", store.stats());
+    pretty_env_logger::init_timed();
+    match dispatch(&opt) {
+        Ok(_) => {
+            process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("operation failed: {}", e);
+            process::exit(1);
+        }
+    }
+}
 
-    let v = store.get("key_1".as_bytes())?.unwrap_or_default();
-    println!("key_1 => {:?}", String::from_utf8_lossy(&v));
+fn dispatch(opt: &Opt) -> tinkv::Result<()> {
+    let mut store = Store::open(&opt.path)?;
 
-    store.set("hello".as_bytes(), "tinkv".as_bytes())?;
-    println!("after set 1: {:?}", store.stats());
+    // dispacth subcommand handler.
+    match &opt.cmd {
+        SubCommand::Get { key } => {
+            handle_get_command(&mut store, key.as_bytes())?;
+        }
+        SubCommand::Set { key, value } => {
+            handle_set_command(&mut store, key.as_bytes(), value.as_bytes())?;
+        }
+        SubCommand::Delete { key } => {
+            handle_delete_command(&mut store, key.as_bytes())?;
+        }
+        SubCommand::Compact => {
+            handle_compact_command(&mut store)?;
+        }
+        SubCommand::Keys => {
+            handle_keys_command(&mut store)?;
+        }
+        SubCommand::Scan { prefix } => {
+            handle_scan_command(&mut store, prefix.as_bytes())?;
+        }
+        SubCommand::Stats => {
+            handle_stats_command(&mut store)?;
+        }
+    }
+    Ok(())
+}
 
-    store.set("hello".as_bytes(), "tinkv 2".as_bytes())?;
-    println!("after set 2: {:?}", store.stats());
+fn handle_set_command(store: &mut Store, key: &[u8], value: &[u8]) -> tinkv::Result<()> {
+    store.set(key, value)?;
+    Ok(())
+}
 
-    store.set("hello 2".as_bytes(), "tinkv".as_bytes())?;
-    println!("after set 3: {:?}", store.stats());
+fn handle_get_command(store: &mut Store, key: &[u8]) -> tinkv::Result<()> {
+    let value = store.get(key)?;
+    match value {
+        None => {
+            println!(
+                "key '{}' is not found in datastore",
+                String::from_utf8_lossy(key)
+            );
+        }
+        Some(value) => {
+            println!("{}", String::from_utf8_lossy(&value));
+        }
+    }
+    Ok(())
+}
 
-    let value = store.get("hello".as_bytes())?;
-    assert_eq!(value, Some("tinkv 2".as_bytes().to_vec()));
+fn handle_delete_command(store: &mut Store, key: &[u8]) -> tinkv::Result<()> {
+    store.remove(key)?;
+    Ok(())
+}
 
-    store.remove("hello".as_bytes())?;
-    println!("after remove: {:?}", store.stats());
-
-    let value_not_found = store.get("hello".as_bytes())?;
-    assert_eq!(value_not_found, None);
-
+fn handle_compact_command(store: &mut Store) -> tinkv::Result<()> {
     store.compact()?;
-    println!("after compaction: {:?}", store.stats());
+    Ok(())
+}
 
-    let v = store.get("key_1".as_bytes())?.unwrap();
-    println!("key_1 => {:?}", String::from_utf8_lossy(&v));
+fn handle_keys_command(store: &mut Store) -> tinkv::Result<()> {
+    store.keys().for_each(|key| {
+        println!("{}", String::from_utf8_lossy(key));
+    });
+    Ok(())
+}
 
+fn handle_scan_command(store: &mut Store, prefix: &[u8]) -> tinkv::Result<()> {
+    // TODO: Optimize it, prefix scanning is too slow if there are too
+    // many keys in datastore. Consider using other data structure like
+    // `Trie`.
+    store.keys().for_each(|key| {
+        if key.starts_with(prefix) {
+            println!("{}", String::from_utf8_lossy(key));
+        }
+    });
+    Ok(())
+}
+
+fn handle_stats_command(store: &mut Store) -> tinkv::Result<()> {
+    let stats = store.stats();
+    println!(
+        "size of stale entries = {}
+total stale entries = {}
+total active entries = {}
+total data files = {}
+size of all data files = {}",
+        bytefmt::format(stats.size_of_stale_entries),
+        stats.total_stale_entries,
+        stats.total_active_entries,
+        stats.total_data_files,
+        bytefmt::format(stats.size_of_all_data_files),
+    );
     Ok(())
 }

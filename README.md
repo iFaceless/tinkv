@@ -2,13 +2,20 @@
 
 [TinKV](https://github.com/iFaceless/tinkv) is a simple and fast key-value storage engine written in Rust. Inspired by [basho/bitcask](https://github.com/basho/bitcask), written after attending the [Talent Plan courses](https://github.com/pingcap/talent-plan). 
 
-Notes:
+**Notes**:
 - *Do not use it in production.*
-- *Operations like set/remove/compact are not thread-safe.*
+- *Operations like set/remove/compact are not thread-safe currently.*
 
 Happy hacking~
 
 ![tinkv-v2.jpg](https://i.loli.net/2020/06/20/S4nEbGps9I5Na6h.jpg)
+
+# Features
+
+- Embeddable (use `tinkv` as a library);
+- Builtin CLI (`tinkv`);
+- Builtin Redis compatible server (WIP);
+- Predictable read/write performance.
 
 # Usage
 ## As a library
@@ -98,6 +105,52 @@ key_1 => "value_1_1592475604853568000_hello_world"
 ```
 </details>
 
+## CLI
+
+```shell
+$ tinkv --help
+tinkv 0.5.0
+0xE8551CCB <noti@ifaceless.space>
+A fast and simple key-value storage engine.
+
+USAGE:
+    tinkv [FLAGS] <path> <SUBCOMMAND>
+
+FLAGS:
+    -h, --help       Prints help information
+    -q, --quiet      Pass many times for less log output
+    -V, --version    Prints version information
+    -v, --verbose    Pass many times for more log output
+
+ARGS:
+    <path>    Path to tinkv datastore
+
+SUBCOMMANDS:
+    compact    Compact data files in datastore and reclaim disk space
+    del        Delete a key value pair from datastore
+    get        Retrive value of a key, and display the value
+    help       Prints this message or the help of the given subcommand(s)
+    keys       List all keys in datastore
+    scan       Perform a prefix scanning for keys
+    set        Store a key value pair into datastore
+    stats      Display statistics of the datastore
+```
+
+Example usages:
+```shell
+$ tinkv /tmp/db set hello world
+$ tinkv /tmp/db get hello
+world
+
+# log info.
+$ tinkv /tmp/db -vvv compact
+2020-06-20T10:32:45.582Z INFO  tinkv::store > open store path: tmp/db
+2020-06-20T10:32:45.582Z INFO  tinkv::store > build key dirfrom data file /tmp/db/000000000001.tinkv.data
+2020-06-20T10:32:45.583Z INFO  tinkv::store > build key dirfrom data file /tmp/db/000000000002.tinkv.data
+2020-06-20T10:32:45.583Z INFO  tinkv::store > build keydirdone, got 1 keys. current stats: Stats { size_of_stale_entries:0, total_stale_entries: 0, total_active_entries: 1,total_data_files: 2, size_of_all_data_files: 60 }
+2020-06-20T10:32:45.583Z INFO  tinkv::store > there are 3 datafiles need to be compacted
+```
+
 ## Client & Server
 
 **Redis-compatible protocol?**
@@ -108,7 +161,7 @@ key_1 => "value_1_1592475604853568000_hello_world"
 - `set <key> <value>`
 - `del <key>`
 
-# Compaction
+# About Compaction
 
 Compation process will be triggered if `size_of_stale_entries >= config::COMPACTION_THRESHOLD` after each call of `set/remove`. Compaction steps are very simple and easy to understand:
 1. Freeze current active segment, and switch to another one.
@@ -137,8 +190,8 @@ fn main() -> tinkv::Result<()> {
 ```shell
 .tinkv
 ├── 000000000001.tinkv.hint -- related index/hint file, for fast startup
-├── 000000000001.tinkv.data  -- immutable data file
-└── 000000000002.tinkv.data  -- active data file
+├── 000000000001.tinkv.data -- immutable data file
+└── 000000000002.tinkv.data -- active data file
 ```
 
 # Refs
