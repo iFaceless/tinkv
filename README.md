@@ -20,6 +20,10 @@ Happy hacking~
 # Usage
 ## As a library
 
+```shell
+$ cargo add tinkv
+```
+
 Full example usage can be found in [examples/basic.rs](./examples/basic.rs).
 
 ```rust
@@ -106,6 +110,12 @@ key_1 => "value_1_1592475604853568000_hello_world"
 </details>
 
 ## CLI
+
+Install `tinkv` executable binaries.
+
+```shell
+$ cargo install tinkv
+```
 
 ```shell
 $ tinkv --help
