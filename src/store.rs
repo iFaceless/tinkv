@@ -195,6 +195,7 @@ impl Store {
     /// Remove key value from database.
     pub fn remove(&mut self, key: &[u8]) -> Result<()> {
         if self.keydir.contains_key(key) {
+            trace!("remove key '{}' from datastore", String::from_utf8_lossy(key));
             // write tomestone, will be removed on compaction.
             let entry = self.write(key, config::REMOVE_TOMESTONE)?;
             // remove key from in-memory index.
@@ -207,6 +208,7 @@ impl Store {
 
             Ok(())
         } else {
+            trace!("remove key '{}' failed, not found in datastore", String::from_utf8_lossy(key));
             Err(TinkvError::KeyNotFound(key.into()))
         }
     }
