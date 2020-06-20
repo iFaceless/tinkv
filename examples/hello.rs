@@ -1,10 +1,12 @@
 use pretty_env_logger;
 use std::time;
-use tinkv::{self, Store};
+use tinkv::{self};
 
 fn main() -> tinkv::Result<()> {
     pretty_env_logger::init_timed();
-    let mut store = Store::open(".tinkv")?;
+    let mut store = tinkv::OpenOptions::new()
+        .max_data_file_size(1024 * 1024)
+        .open(".tinkv")?;
 
     let begin = time::Instant::now();
 
