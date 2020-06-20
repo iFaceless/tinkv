@@ -8,7 +8,7 @@ Notes:
 
 Happy hacking~
 
-![tinkv-overview.png](https://i.loli.net/2020/06/17/DW5JTEF4MlCsOLZ.png)
+![tinkv-v2.jpg](https://i.loli.net/2020/06/20/S4nEbGps9I5Na6h.jpg)
 
 # Usage
 ## As a library

@@ -3,7 +3,6 @@ use crate::config;
 use crate::error::{Result, TinkvError};
 use crate::{
     segment::{DataEntry, DataFile, HintFile},
-    util,
 };
 use glob::glob;
 use log::{info, trace};
@@ -220,8 +219,7 @@ impl Store {
             .as_mut()
             .expect("active data file not found");
         // TODO: check file size, switch to another one if nessesary.
-        let timestamp = util::current_timestamp();
-        let entry = df.write(key, value, timestamp)?;
+        let entry = df.write(key, value)?;
 
         if self.config.sync {
             // make sure data entry is persisted in storage.

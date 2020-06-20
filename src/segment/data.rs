@@ -15,8 +15,6 @@ use std::path::{Path, PathBuf};
 struct InnerEntry {
     key: Vec<u8>,
     value: Vec<u8>,
-    // timestamp in nanos.
-    timestamp: u128,
     // crc32 checksum
     checksum: u32,
 }
@@ -24,11 +22,10 @@ struct InnerEntry {
 impl InnerEntry {
     /// New data entry with given key and value.
     /// Checksum will be updated internally.
-    fn new(key: &[u8], value: &[u8], timestamp: u128) -> Self {
+    fn new(key: &[u8], value: &[u8]) -> Self {
         let mut ent = InnerEntry {
             key: key.into(),
             value: value.into(),
-            timestamp,
             checksum: 0,
         };
         ent.checksum = ent.fresh_checksum();
@@ -36,8 +33,7 @@ impl InnerEntry {
     }
 
     fn fresh_checksum(&self) -> u32 {
-        // TODO: optimize it to avoid cloning.
-        checksum(&[self.key.clone(), self.value.clone()].concat())
+        checksum(&self.value)
     }
 
     /// Check data entry is corrupted or not.
@@ -50,9 +46,8 @@ impl fmt::Display for InnerEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "DataInnerEntry(key='{}', timestamp={}, checksum={})",
+            "DataInnerEntry(key='{}', checksum={})",
             String::from_utf8_lossy(self.key.as_ref()),
-            self.timestamp,
             self.checksum,
         )
     }
@@ -94,24 +89,17 @@ impl Entry {
     pub(crate) fn value(&self) -> &[u8] {
         &self.inner.value
     }
-
-    /// Return timestamp of the inner entry.
-    #[allow(dead_code)]
-    pub(crate) fn timestamp(&self) -> u128 {
-        self.inner.timestamp
-    }
 }
 
 impl fmt::Display for Entry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "DataEntry(file_id={}, key='{}', offset={}, size={}, timestamp={})",
+            "DataEntry(file_id={}, key='{}', offset={}, size={})",
             self.file_id,
             String::from_utf8_lossy(self.key().as_ref()),
             self.offset,
             self.size,
-            self.timestamp(),
         )
     }
 }
@@ -168,8 +156,8 @@ impl DataFile {
     }
 
     /// Save key-value pair to segement file.
-    pub(crate) fn write(&mut self, key: &[u8], value: &[u8], timestamp: u128) -> Result<Entry> {
-        let inner = InnerEntry::new(key, value, timestamp);
+    pub(crate) fn write(&mut self, key: &[u8], value: &[u8]) -> Result<Entry> {
+        let inner = InnerEntry::new(key, value);
         trace!("append {} to segement file {}", &inner, self.path.display());
         // avoid immutable borrowing issue.
         let path = self.path.as_path();
@@ -314,27 +302,22 @@ impl Iterator for EntryIter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::*;
 
     #[test]
     fn test_new_entry() {
-        let ts = current_timestamp();
-        let ent = InnerEntry::new(&b"key".to_vec(), &b"value".to_vec(), ts);
-        assert_eq!(ent.timestamp <= current_timestamp(), true);
+        let ent = InnerEntry::new(&b"key".to_vec(), &b"value".to_vec());
         assert_eq!(ent.checksum, 3327521766);
     }
 
     #[test]
     fn test_checksum_valid() {
-        let ts = current_timestamp();
-        let ent = InnerEntry::new(&b"key".to_vec(), &b"value".to_vec(), ts);
+        let ent = InnerEntry::new(&b"key".to_vec(), &b"value".to_vec());
         assert_eq!(ent.is_valid(), true);
     }
 
     #[test]
     fn test_checksum_invalid() {
-        let ts = current_timestamp();
-        let mut ent = InnerEntry::new(&b"key".to_vec(), &b"value".to_vec(), ts);
+        let mut ent = InnerEntry::new(&b"key".to_vec(), &b"value".to_vec());
         ent.value = b"value_changed".to_vec();
         assert_eq!(ent.is_valid(), false);
     }
