@@ -109,10 +109,7 @@ key_1 => "value_1_1592475604853568000_hello_world"
 
 ```shell
 $ tinkv --help
-tinkv 0.5.0
-0xE8551CCB <noti@ifaceless.space>
-A fast and simple key-value storage engine.
-
+...
 USAGE:
     tinkv [FLAGS] <path> <SUBCOMMAND>
 
@@ -142,7 +139,7 @@ $ tinkv /tmp/db set hello world
 $ tinkv /tmp/db get hello
 world
 
-# log info.
+# Change verbosity level (info).
 $ tinkv /tmp/db -vvv compact
 2020-06-20T10:32:45.582Z INFO  tinkv::store > open store path: tmp/db
 2020-06-20T10:32:45.582Z INFO  tinkv::store > build key dirfrom data file /tmp/db/000000000001.tinkv.data
@@ -152,6 +149,8 @@ $ tinkv /tmp/db -vvv compact
 ```
 
 ## Client & Server
+
+*WIP...*
 
 **Redis-compatible protocol?**
 
