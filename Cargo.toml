@@ -8,7 +8,7 @@ path = 'examples/hello.rs'
 
 [package]
 name = 'tinkv'
-version = '0.4.0'
+version = '0.5.0'
 authors = ['0xE8551CCB <noti@ifaceless.space>']
 edition = '2018'
 description = 'A fast and simple key-value storage engine.'
@@ -31,6 +31,8 @@ log = '0.4.8'
 pretty_env_logger = '0.4.0'
 impls = '1.0.3'
 bincode = '1.2.1'
+clap-verbosity-flag = "0.3.1"
+bytefmt = "0.1.7"
 
 [dependencies.serde]
 version = '1.0.111'
