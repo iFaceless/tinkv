@@ -8,7 +8,7 @@ path = 'examples/hello.rs'
 
 [package]
 name = 'tinkv'
-version = '0.5.0'
+version = '0.5.1'
 authors = ['0xE8551CCB <noti@ifaceless.space>']
 edition = '2018'
 description = 'A fast and simple key-value storage engine.'
@@ -19,6 +19,8 @@ keywords = [
 ]
 categories = ['database-implementations']
 license = 'MIT'
+readme = "README.md"
+homepage = "https://github.com/iFaceless/tinkv"
 
 [dependencies]
 clap = '2.33.1'
