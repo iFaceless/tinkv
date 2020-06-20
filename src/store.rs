@@ -124,6 +124,7 @@ impl Store {
             }
 
             if entry.value() == config::REMOVE_TOMESTONE {
+                trace!("{} is a remove tomestone", &entry);
                 self.stats.total_stale_entries += 1;
                 self.stats.size_of_stale_entries += entry.size;
 
@@ -131,10 +132,10 @@ impl Store {
                     self.stats.size_of_stale_entries += old_ent.size;
                     self.stats.total_stale_entries += 1;
                 }
+            } else {
+                let keydir_ent = KeyDirEntry::new(file_id.clone(), entry.offset, entry.size);
+                self.keydir.insert(entry.key().into(), keydir_ent);
             }
-
-            let keydir_ent = KeyDirEntry::new(file_id.clone(), entry.offset, entry.size);
-            self.keydir.insert(entry.key().into(), keydir_ent);
         }
         Ok(())
     }
@@ -195,7 +196,10 @@ impl Store {
     /// Remove key value from database.
     pub fn remove(&mut self, key: &[u8]) -> Result<()> {
         if self.keydir.contains_key(key) {
-            trace!("remove key '{}' from datastore", String::from_utf8_lossy(key));
+            trace!(
+                "remove key '{}' from datastore",
+                String::from_utf8_lossy(key)
+            );
             // write tomestone, will be removed on compaction.
             let entry = self.write(key, config::REMOVE_TOMESTONE)?;
             // remove key from in-memory index.
@@ -208,7 +212,10 @@ impl Store {
 
             Ok(())
         } else {
-            trace!("remove key '{}' failed, not found in datastore", String::from_utf8_lossy(key));
+            trace!(
+                "remove key '{}' failed, not found in datastore",
+                String::from_utf8_lossy(key)
+            );
             Err(TinkvError::KeyNotFound(key.into()))
         }
     }

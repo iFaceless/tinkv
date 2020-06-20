@@ -10,7 +10,7 @@ fn main() -> tinkv::Result<()> {
 
     let begin = time::Instant::now();
 
-    const TOTAL_KEYS: usize = 200000;
+    const TOTAL_KEYS: usize = 1;
     for i in 0..TOTAL_KEYS {
         let k = format!("hello_{}", i);
         let v = format!("world_{}", i);
