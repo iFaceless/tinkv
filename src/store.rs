@@ -1,9 +1,7 @@
 //! A simple key-value store.
 use crate::config;
 use crate::error::{Result, TinkvError};
-use crate::{
-    segment::{DataEntry, DataFile, HintFile},
-};
+use crate::segment::{DataEntry, DataFile, HintFile};
 use glob::glob;
 use log::{info, trace};
 use std::collections::{BTreeMap, HashMap};
@@ -214,13 +212,29 @@ impl Store {
     }
 
     fn write(&mut self, key: &[u8], value: &[u8]) -> Result<DataEntry> {
-        let df = self
+        let mut df = self
             .active_data_file
             .as_mut()
             .expect("active data file not found");
-        // TODO: check file size, switch to another one if nessesary.
-        let entry = df.write(key, value)?;
 
+        // check file size, switch to another one if nessesary.
+        if df.size > self.config.max_data_file_size {
+            info!("size of active data file '{}' exceeds maximum size of {} bytes, switch to another one.", df.path.display(), self.config.max_data_file_size);
+
+            // close current active data file.
+            drop(df);
+
+            // create a new active data file.
+            self.new_active_data_file(None)?;
+
+            // get new active data file for writting.
+            df = self
+                .active_data_file
+                .as_mut()
+                .expect("active data file not found");
+        }
+
+        let entry = df.write(key, value)?;
         if self.config.sync {
             // make sure data entry is persisted in storage.
             df.sync()?;
