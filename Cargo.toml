@@ -17,7 +17,7 @@ keywords = [
     'key-value',
     'storage',
 ]
-categories = ['Development']
+categories = ['database-implementations']
 license = 'MIT'
 
 [dependencies]
