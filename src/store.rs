@@ -372,17 +372,44 @@ impl Store {
             + 1
     }
 
-    /// Return current stats of storage engine.
+    /// Return current stats of datastore.
     pub fn stats(&mut self) -> &Stats {
         &self.stats
     }
 
-    /// Return all keys in data store.
+    /// Return all keys in datastore.
     pub fn keys(&self) -> impl Iterator<Item = &Vec<u8>> {
         self.keydir.keys()
     }
 
-    /// Force any writes to disk.
+    /// Return total number of keys in datastore.
+    pub fn len(&self) -> u64 {
+        self.keydir.len() as u64
+    }
+
+    /// Iterate all keys in datastore and call function `f`
+    /// for each entry.
+    pub fn for_each<F>(&mut self, f: F) -> Result<()>
+    where
+        F: Fn(&[u8], &[u8]),
+    {
+        // too stupid, just in order to pass borrow checking. 
+        // FIXME: find a better way to implement this feature?
+        let mut keys = vec![];
+        for key in self.keys() {
+            keys.push(key.clone());
+        }
+
+        for key in keys {
+            let r = self.get(&key)?;
+            if let Some(value) = r {
+                f(&key, &value);
+            }
+        }
+        Ok(())
+    }
+
+    /// Force flushing any pending writes to disk.
     pub fn sync(&mut self) -> Result<()> {
         if self.active_data_file.is_some() {
             self.active_data_file.as_mut().unwrap().sync()?;

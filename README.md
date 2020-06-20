@@ -76,6 +76,8 @@ Public APIs of tinkv store are very easy to use:
 |`store.remove(key, value)`| Remove a key from datastore.|
 |`store.compact()`         | Merge data files into a more compact form. drop stale segments to release disk space. Produce hint files after compaction for faster startup.|
 |`store.keys()`            | Return all the keys in database.|
+|`store.len()`             | Return total number of keys in database.|
+|`store.for_each(f: impl Fn(key, value))`             | Iterate all keys in database and call function `f` for each entry.|
 |`store.stas()`            | Get current statistics of database.|
 |`store.sync()`            | Force any writes to datastore.|
 |`store.close()`           | Close datastore, sync all pending writes to disk.|
