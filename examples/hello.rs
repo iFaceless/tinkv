@@ -5,26 +5,30 @@ use tinkv::{self};
 fn main() -> tinkv::Result<()> {
     pretty_env_logger::init_timed();
     let mut store = tinkv::OpenOptions::new()
-        .max_data_file_size(1024 * 1024)
+        .max_data_file_size(1024 * 100)
         .open(".tinkv")?;
 
     let begin = time::Instant::now();
 
-    const TOTAL_KEYS: usize = 10;
+    const TOTAL_KEYS: usize = 0;
     for i in 0..TOTAL_KEYS {
         let k = format!("hello_{}", i);
         let v = format!("world_{}", i);
         store.set(k.as_bytes(), v.as_bytes())?;
+        store.set(k.as_bytes(), format!("{}_new", v).as_bytes())?;
     }
 
     let duration = time::Instant::now().duration_since(begin);
-    let speed = (TOTAL_KEYS) as f32 / duration.as_secs_f32();
+    let speed = (TOTAL_KEYS * 2) as f32 / duration.as_secs_f32();
     println!(
         "{} keys written in {} secs, {} keys/s",
-        TOTAL_KEYS,
+        TOTAL_KEYS * 2,
         duration.as_secs_f32(),
         speed
     );
+
+    let stats = store.stats();
+    println!("{:?}", stats);
 
     store.compact()?;
 
@@ -38,6 +42,9 @@ fn main() -> tinkv::Result<()> {
 
     let v = store.get("hello_1".as_bytes())?.unwrap_or_default();
     println!("{}", String::from_utf8_lossy(&v));
+
+    let stats = store.stats();
+    println!("{:?}", stats);
 
     Ok(())
 }

@@ -154,9 +154,9 @@ world
 # Change verbosity level (info).
 $ tinkv /tmp/db -vvv compact
 2020-06-20T10:32:45.582Z INFO  tinkv::store > open store path: tmp/db
-2020-06-20T10:32:45.582Z INFO  tinkv::store > build key dirfrom data file /tmp/db/000000000001.tinkv.data
-2020-06-20T10:32:45.583Z INFO  tinkv::store > build key dirfrom data file /tmp/db/000000000002.tinkv.data
-2020-06-20T10:32:45.583Z INFO  tinkv::store > build keydirdone, got 1 keys. current stats: Stats { size_of_stale_entries:0, total_stale_entries: 0, total_active_entries: 1,total_data_files: 2, size_of_all_data_files: 60 }
+2020-06-20T10:32:45.582Z INFO  tinkv::store > build keydir from data file /tmp/db/000000000001.tinkv.data
+2020-06-20T10:32:45.583Z INFO  tinkv::store > build keydir from data file /tmp/db/000000000002.tinkv.data
+2020-06-20T10:32:45.583Z INFO  tinkv::store > build keydir done, got 1 keys. current stats: Stats { size_of_stale_entries:0, total_stale_entries: 0, total_active_entries: 1,total_data_files: 2, size_of_all_data_files: 60 }
 2020-06-20T10:32:45.583Z INFO  tinkv::store > there are 3 datafiles need to be compacted
 ```
 

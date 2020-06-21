@@ -3,7 +3,7 @@ use crate::config;
 use crate::error::{Result, TinkvError};
 use crate::segment::{DataEntry, DataFile, HintFile};
 use glob::glob;
-use log::{info, trace};
+use log::{info, trace, debug};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::fs::create_dir_all;
@@ -106,14 +106,18 @@ impl Store {
 
         for entry in hint_file.entry_iter() {
             let keydir_ent = KeyDirEntry::new(hint_file_id, entry.offset, entry.size);
-            self.keydir.insert(entry.key, keydir_ent);
+            let old = self.keydir.insert(entry.key, keydir_ent);
+            if let Some(old_ent) = old {
+                self.stats.size_of_stale_entries += old_ent.size;
+                self.stats.total_stale_entries += 1;
+            }
         }
         Ok(())
     }
 
     fn build_keydir_from_data_file(&mut self, file_id: u64) -> Result<()> {
         let df = self.data_files.get(&file_id).unwrap();
-        info!("build key dir from data file {}", df.path.display());
+        info!("build keydir from data file {}", df.path.display());
         for entry in df.entry_iter() {
             if !entry.is_valid() {
                 return Err(TinkvError::DataEntryCorrupted {
@@ -134,7 +138,11 @@ impl Store {
                 }
             } else {
                 let keydir_ent = KeyDirEntry::new(file_id.clone(), entry.offset, entry.size);
-                self.keydir.insert(entry.key().into(), keydir_ent);
+                let old = self.keydir.insert(entry.key().into(), keydir_ent);
+                if let Some(old_ent) = old {
+                    self.stats.size_of_stale_entries += old_ent.size;
+                    self.stats.total_stale_entries += 1;
+                }
             }
         }
         Ok(())
@@ -147,7 +155,7 @@ impl Store {
 
         // build data file path.
         let p = segment_data_file_path(&self.path, next_file_id);
-        trace!("new data file at: {}", &p.display());
+        debug!("new data file at: {}", &p.display());
         self.active_data_file = Some(DataFile::new(p.as_path(), true)?);
 
         // preapre a read-only data file with the same path.
@@ -172,7 +180,7 @@ impl Store {
         // save data to data file.
         let ent = self.write(key, value)?;
 
-        // update key dir, the in-memory index.
+        // update keydir, the in-memory index.
         let old = self.keydir.insert(
             key.to_vec(),
             KeyDirEntry::new(ent.file_id, ent.offset, ent.size),
@@ -284,26 +292,61 @@ impl Store {
             "there are {} data files need to be compacted",
             self.data_files.len()
         );
-        let compaction_data_file_id = self.next_file_id();
+ 
+        let next_file_id = self.next_file_id();
+
         // switch to another active data file.
-        self.new_active_data_file(Some(compaction_data_file_id + 1))?;
+        self.new_active_data_file(Some(next_file_id + 1))?;
+        let mut compaction_data_file_id = next_file_id + 2;
 
         // create a new data file for compaction.
         let data_file_path = segment_data_file_path(&self.path, compaction_data_file_id);
 
-        trace!("create compaction data file: {}", data_file_path.display());
+        debug!("create compaction data file: {}", data_file_path.display());
         let mut compaction_df = DataFile::new(&data_file_path, true)?;
+
+        // register read-only compaction data file.
+        self.data_files
+            .insert(compaction_df.id, DataFile::new(&compaction_df.path, false)?);
 
         // create a new hint file to store compaction file index.
         let hint_file_path = segment_hint_file_path(&self.path, compaction_data_file_id);
 
-        trace!("create compaction hint file: {}", hint_file_path.display());
+        debug!("create compaction hint file: {}", hint_file_path.display());
         let mut hint_file = HintFile::new(&hint_file_path, true)?;
+
+        let mut total_size_of_compaction_files = 0;
 
         // copy all the data entries into compaction data file.
         // TODO: check if data file size exceeds threshold, switch
         // to another one if nessesary.
         for (key, keydir_ent) in self.keydir.iter_mut() {
+            if compaction_df.size > self.config.max_data_file_size {
+                total_size_of_compaction_files += compaction_df.size;
+
+                compaction_df.sync()?;
+                hint_file.sync()?;
+
+                compaction_data_file_id += 1;
+                // switch to a new data file for compaction.
+                let data_file_path = segment_data_file_path(&self.path, compaction_data_file_id);
+                debug!(
+                    "file size exceeds limit, switch to another compaction data file: {}",
+                    data_file_path.display()
+                );
+                compaction_df = DataFile::new(&data_file_path, true)?;
+
+                self.data_files
+                    .insert(compaction_df.id, DataFile::new(&compaction_df.path, false)?);
+
+                let hint_file_path = segment_hint_file_path(&self.path, compaction_data_file_id);
+                debug!(
+                    "switch to another compaction hint file: {}",
+                    hint_file_path.display()
+                );
+                hint_file = HintFile::new(&hint_file_path, true)?;
+            }
+
             let df = self
                 .data_files
                 .get_mut(&keydir_ent.segment_id)
@@ -314,6 +357,7 @@ impl Store {
                 df.path.display(),
                 compaction_df.path.display()
             );
+
             let offset = compaction_df.copy_bytes_from(df, keydir_ent.offset, keydir_ent.size)?;
 
             keydir_ent.segment_id = compaction_df.id;
@@ -325,18 +369,20 @@ impl Store {
         compaction_df.sync()?;
         hint_file.sync()?;
 
+        total_size_of_compaction_files += compaction_df.size;
+
         // remove stale segments.
         let mut stale_segment_count = 0;
         for df in self.data_files.values() {
-            if df.id < compaction_data_file_id {
+            if df.id <= next_file_id {
                 if df.path.exists() {
-                    trace!("try to remove stale data file: {}", df.path.display());
+                    debug!("try to remove stale data file: {}", df.path.display());
                     fs::remove_file(&df.path)?;
                 }
 
                 let hint_file_path = segment_hint_file_path(&self.path, df.id);
                 if hint_file_path.exists() {
-                    trace!(
+                    debug!(
                         "try to remove stale hint file: {}",
                         &hint_file_path.display()
                     );
@@ -347,19 +393,15 @@ impl Store {
             }
         }
 
-        self.data_files.retain(|&k, _| k >= compaction_data_file_id);
-        trace!("cleaned {} stale segments", stale_segment_count);
-
-        // register read-only compaction data file.
-        self.data_files
-            .insert(compaction_df.id, DataFile::new(&compaction_df.path, false)?);
+        self.data_files.retain(|&k, _| k > next_file_id);
+        debug!("cleaned {} stale segments", stale_segment_count);
 
         // update stats.
         self.stats.total_data_files = self.data_files.len() as u64;
         self.stats.total_active_entries = self.keydir.len() as u64;
         self.stats.total_stale_entries = 0;
         self.stats.size_of_stale_entries = 0;
-        self.stats.size_of_all_data_files = compaction_df.size;
+        self.stats.size_of_all_data_files = total_size_of_compaction_files;
 
         Ok(())
     }
@@ -393,7 +435,7 @@ impl Store {
     where
         F: Fn(&[u8], &[u8]),
     {
-        // too stupid, just in order to pass borrow checking. 
+        // too stupid, just in order to pass borrow checking.
         // FIXME: find a better way to implement this feature?
         let mut keys = vec![];
         for key in self.keys() {
