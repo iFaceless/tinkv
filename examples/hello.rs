@@ -10,7 +10,7 @@ fn main() -> tinkv::Result<()> {
 
     let begin = time::Instant::now();
 
-    const TOTAL_KEYS: usize = 0;
+    const TOTAL_KEYS: usize = 1000;
     for i in 0..TOTAL_KEYS {
         let k = format!("hello_{}", i);
         let v = format!("world_{}", i);
@@ -32,12 +32,21 @@ fn main() -> tinkv::Result<()> {
 
     store.compact()?;
 
-    store.for_each(|k, v| {
+    let mut index = 0;
+    store.for_each(&mut |k, v| {
+        index += 1;
+
         println!(
             "key={}, value={}",
             String::from_utf8_lossy(&k),
             String::from_utf8_lossy(&v)
         );
+
+        if index > 5 {
+            Ok(false)
+        } else {
+            Ok(true)
+        }
     })?;
 
     let v = store.get("hello_1".as_bytes())?.unwrap_or_default();

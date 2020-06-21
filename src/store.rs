@@ -431,9 +431,15 @@ impl Store {
 
     /// Iterate all keys in datastore and call function `f`
     /// for each entry.
-    pub fn for_each<F>(&mut self, f: F) -> Result<()>
+    ///
+    /// If function `f` returns an `Err`, it stops iteration
+    /// and propgates the `Err` to the caller.
+    /// 
+    /// You can continue iteration manually by returning `Ok(true)`,
+    /// or stop iteration by returning `Ok(false)`.
+    pub fn for_each<F>(&mut self, f: &mut F) -> Result<()>
     where
-        F: Fn(&[u8], &[u8]),
+        F: FnMut(&[u8], &[u8]) -> Result<bool>,
     {
         // too stupid, just in order to pass borrow checking.
         // FIXME: find a better way to implement this feature?
@@ -445,7 +451,10 @@ impl Store {
         for key in keys {
             let r = self.get(&key)?;
             if let Some(value) = r {
-                f(&key, &value);
+                let contine = f(&key, &value)?;
+                if !contine {
+                    break;
+                }
             }
         }
         Ok(())
