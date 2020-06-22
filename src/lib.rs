@@ -3,6 +3,8 @@ mod config;
 mod error;
 mod segment;
 mod store;
+mod resp;
+mod server;
 pub mod util;
 
 pub use error::{Result, TinkvError};
