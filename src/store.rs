@@ -534,7 +534,7 @@ fn segment_file_path(dir: &Path, segment_id: u64, suffix: &str) -> PathBuf {
 }
 
 #[derive(Debug, Copy, Clone)]
-struct Config {
+pub(crate) struct Config {
     max_data_file_size: u64,
     max_key_size: u64,
     max_value_size: u64,
