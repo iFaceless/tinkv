@@ -154,6 +154,31 @@ impl Server {
                         msg: format!("{}", e),
                     },
                 }
+            }
+            "KEYS" => {
+                if request.args.len() != 1 {
+                    return RespValue::Error {
+                        name: "ERR".to_owned(),
+                        msg: "wrong number of arguments for 'keys' command".to_owned(),
+                    };
+                }
+
+                let pattern: &String = request.args.get(0).unwrap();
+                let mut resp: Vec<RespValue> = Vec::new();
+                if pattern.ends_with("*") {
+                    let prefix = pattern.trim_end_matches('*').as_bytes();
+                    for k in self.store.keys() {
+                        if prefix.len() == 0 || k.starts_with(prefix) {
+                            // collect keys
+                            resp.push(RespValue::BulkStr(String::from_utf8_lossy(k).into()));
+                        }
+                    }
+                }
+                if resp.len() == 0 {
+                    return RespValue::NullArray;
+                }
+
+                return RespValue::Array(resp);
             },
             _ => RespValue::Error {
                 name: "ERR".to_owned(),
@@ -232,7 +257,7 @@ impl RespValue {
                 for m in members {
                     s.push(m.serialize());
                 }
-                s.join("")
+                format!("*{}\r\n{}", members.len(), s.join(""))
             }
             RespValue::NullBulkStr => {
                 return "$-1\r\n".to_owned();
