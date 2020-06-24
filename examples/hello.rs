@@ -6,7 +6,7 @@ fn main() -> tinkv::Result<()> {
     pretty_env_logger::init_timed();
     let mut store = tinkv::OpenOptions::new()
         .max_data_file_size(1024 * 100)
-        .open(".tinkv")?;
+        .open("/usr/local/var/tinkv")?;
 
     let begin = time::Instant::now();
 
@@ -32,7 +32,7 @@ fn main() -> tinkv::Result<()> {
 
     store.compact()?;
 
-    let mut index = 0;
+    let mut index = 100;
     store.for_each(&mut |k, v| {
         index += 1;
 

@@ -180,6 +180,15 @@ impl Server {
 
                 return RespValue::Array(resp);
             },
+            "DBSIZE" => {
+                if request.args.len() != 0 {
+                    return RespValue::Error {
+                        name: "ERR".to_owned(),
+                        msg: "wrong number of arguments for 'dbsize' command".to_owned(),
+                    };
+                }
+                RespValue::Integer(self.store.len() as i64)
+            }
             _ => RespValue::Error {
                 name: "ERR".to_owned(),
                 msg: format!("unsupported command '{}'", request.cmd),
