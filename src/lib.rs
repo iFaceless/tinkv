@@ -8,5 +8,5 @@ mod store;
 pub mod util;
 
 pub use error::{Result, TinkvError};
+pub use server::Server;
 pub use store::{OpenOptions, Store};
-pub use server::{Server};

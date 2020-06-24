@@ -1,6 +1,7 @@
 use anyhow;
 use glob;
 use std::io;
+use std::num::ParseIntError;
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -10,6 +11,8 @@ pub type Result<T> = ::std::result::Result<T, TinkvError>;
 /// The kind of error that could be produced during tinkv operation.
 #[derive(Error, Debug)]
 pub enum TinkvError {
+    #[error(transparent)]
+    ParseInt(#[from] ParseIntError),
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]

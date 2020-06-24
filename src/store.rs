@@ -3,7 +3,7 @@ use crate::config;
 use crate::error::{Result, TinkvError};
 use crate::segment::{DataEntry, DataFile, HintFile};
 use glob::glob;
-use log::{info, trace, debug};
+use log::{debug, info, trace};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::fs::create_dir_all;
@@ -292,7 +292,7 @@ impl Store {
             "there are {} data files need to be compacted",
             self.data_files.len()
         );
- 
+
         let next_file_id = self.next_file_id();
 
         // switch to another active data file.
@@ -434,7 +434,7 @@ impl Store {
     ///
     /// If function `f` returns an `Err`, it stops iteration
     /// and propgates the `Err` to the caller.
-    /// 
+    ///
     /// You can continue iteration manually by returning `Ok(true)`,
     /// or stop iteration by returning `Ok(false)`.
     pub fn for_each<F>(&mut self, f: &mut F) -> Result<()>

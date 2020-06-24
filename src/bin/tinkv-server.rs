@@ -9,7 +9,7 @@ use pretty_env_logger;
 use structopt::StructOpt;
 use tinkv::{config, OpenOptions, Server};
 
-const DEFAULT_DATASTORE_PATH: &str = "/usr/local/var/";
+const DEFAULT_DATASTORE_PATH: &str = "/usr/local/var/tinkv";
 const DEFAULT_LISTENING_ADDR: &str = "127.0.0.1:9815";
 
 #[derive(Debug, StructOpt)]
@@ -33,23 +33,25 @@ struct Opt {
     )]
     addr: SocketAddr,
     /// Set max key size (in bytes).
-    #[structopt(long, value_name = "MAX_KEY_SIZE")]
+    #[structopt(long, value_name = "KEY-SIZE")]
     max_key_size: Option<u64>,
     /// Set max value size (in bytes).
-    #[structopt(long, value_name = "MAX_VALUE_SIZE")]
+    #[structopt(long, value_name = "VALUE-SIZE")]
     max_value_size: Option<u64>,
     /// Set max file size (in bytes).
-    #[structopt(long, value_name = "MAX_DATA_FILE_SIZE")]
+    #[structopt(long, value_name = "FILE-SIZE")]
     max_data_file_size: Option<u64>,
     /// Sync all pending writes to disk after each writing operation (default to false).
     #[structopt(long, value_name = "SYNC")]
     sync: bool,
 }
-
 fn main() -> Result<(), Box<dyn Error>> {
-    pretty_env_logger::init_timed();
-
     let opt = Opt::from_args();
+    if let Some(level) = opt.verbose.log_level() {
+        std::env::set_var("RUST_LOG", format!("{}", level));
+    }
+    pretty_env_logger::init_timed();
+    
     debug!("get tinkv server config from command line: {:?}", &opt);
     let store = OpenOptions::new()
         .max_key_size(
