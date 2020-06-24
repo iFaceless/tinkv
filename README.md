@@ -14,7 +14,7 @@ Happy hacking~
 
 - Embeddable (use `tinkv` as a library);
 - Builtin CLI (`tinkv`);
-- Builtin Redis compatible server (WIP);
+- Builtin Redis compatible server;
 - Predictable read/write performance.
 
 # Usage
@@ -162,15 +162,57 @@ $ tinkv /tmp/db -vvv compact
 
 ## Client & Server
 
-*WIP...*
-
-**Redis-compatible protocol?**
-
-**Note**: not all the redis commands are available, only a few of them are supported by tinkv.
+[`tinkv-server`](./bin/../src/bin/tinkv-server.rs) is a redis-compatible key/value store server. However, not all the redis commmands are supported. The available commands are:
 
 - `get <key>`
 - `set <key> <value>`
 - `del <key>`
+- `ping [<message>]`
+- `compact`: extended command to trigger a compaction manually.
+
+Key/value pairs are persisted in log files of directory `/urs/local/var/tinkv`. The default listening address of `tinkv-server` is `127.0.0.1:9815`, and you can connect to it with a redis client.
+
+### Quick Start
+
+Install `tinkv-server` is very simple:
+
+```shell
+$ cargo install tinkv
+```
+
+Start server with default config (set log level to `info` mode):
+
+```shell
+$ tinkv-server -vv
+2020-06-24T13:46:49.341Z INFO  tinkv::store > open store path: /usr/local/var/tinkv
+2020-06-24T13:46:49.343Z INFO  tinkv::store > build keydir from data file /usr/local/var/tinkv/000000000001.tinkv.data
+2020-06-24T13:46:49.343Z INFO  tinkv::store > build keydir from data file /usr/local/var/tinkv/000000000002.tinkv.data
+2020-06-24T13:46:49.343Z INFO  tinkv::store > build keydir done, got 0 keys. current stats: Stats { size_of_stale_entries: 0,total_stale_entries: 0, total_active_entries: 0, total_data_files: 2, size_of_all_data_files: 0 }
+2020-06-24T13:46:49.343Z INFO  tinkv::server > TinKV server is listening at '127.0.0.1:9815'
+```
+
+Communicate with `tinkv-server` by using `reids-cli`:
+
+```shell
+$ redis-cli -p 9815
+127.0.0.1:9815> ping
+PONG
+127.0.0.1:9815> ping "hello, tinkv"
+"hello, tinkv"
+127.0.0.1:9815> set user.name 0xE8551CCB
+OK
+127.0.0.1:9815> get user.name
+"0xE8551CCB"
+127.0.0.1:9815> del user.name
+OK
+127.0.0.1:9815> get user.name
+(nil)
+127.0.0.1:9815> compact
+OK
+127.0.0.1:9815> not_found
+(error) ERR unsupported command 'NOT_FOUND'
+127.0.0.1:9815>
+```
 
 # About Compaction
 

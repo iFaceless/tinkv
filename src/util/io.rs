@@ -1,8 +1,8 @@
 //! Some io helpers.
+
 use std::fs;
 use std::io::prelude::*;
 use std::io::{self, BufReader, BufWriter, SeekFrom};
-
 #[derive(Debug)]
 pub struct BufReaderWithOffset<R: Read + Seek> {
     reader: BufReader<R>,
@@ -135,5 +135,55 @@ impl Write for FileWithBufWriter {
 impl Seek for FileWithBufWriter {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         self.bw.seek(pos)
+    }
+}
+
+const CARRIAGE_RETURN: &[u8] = b"\r";
+const LINE_FEED: &[u8] = b"\n";
+
+/// Read byte lines from an instance of `BufRead`.
+///
+/// Unlike `io::Lines`, it simply return byte lines instead
+/// of string lines.
+///
+/// Ref: https://github.com/whitfin/bytelines/blob/master/src/lib.rs
+#[derive(Debug)]
+pub struct ByteLineReader<B: BufRead> {
+    reader: B,
+    buf: Vec<u8>,
+}
+
+impl<B: BufRead> ByteLineReader<B> {
+    /// Create a new `ByteLineReader` instance from given instance of `BufRead`
+    pub fn new(reader: B) -> Self {
+        Self {
+            reader: reader,
+            buf: Vec::new(),
+        }
+    }
+
+    pub fn next(&mut self) -> Option<io::Result<&[u8]>> {
+        self.buf.clear();
+        match self.reader.read_until(b'\n', &mut self.buf) {
+            Ok(0) => None,
+            Ok(mut n) => {
+                if self.buf.ends_with(LINE_FEED) {
+                    self.buf.pop();
+                    n -= 1;
+                    if self.buf.ends_with(CARRIAGE_RETURN) {
+                        self.buf.pop();
+                        n -= 1;
+                    }
+                }
+                Some(Ok(&self.buf[..n]))
+            }
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+impl<B: BufRead> Read for ByteLineReader<B> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.reader.read(buf)
     }
 }
