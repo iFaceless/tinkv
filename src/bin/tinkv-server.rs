@@ -10,7 +10,7 @@ use structopt::StructOpt;
 use tinkv::{config, OpenOptions, Server};
 
 const DEFAULT_DATASTORE_PATH: &str = "/usr/local/var/tinkv";
-const DEFAULT_LISTENING_ADDR: &str = "127.0.0.1:9815";
+const DEFAULT_LISTENING_ADDR: &str = "127.0.0.1:7379";
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::env::set_var("RUST_LOG", format!("{}", level));
     }
     pretty_env_logger::init_timed();
-    
+
     debug!("get tinkv server config from command line: {:?}", &opt);
     let store = OpenOptions::new()
         .max_key_size(

@@ -40,4 +40,6 @@ pub enum TinkvError {
     Custom(String),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+    #[error("{}", .0)]
+    Protocol(String),
 }

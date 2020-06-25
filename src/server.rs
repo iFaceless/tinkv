@@ -179,7 +179,7 @@ impl Server {
                 }
 
                 return RespValue::Array(resp);
-            },
+            }
             "DBSIZE" => {
                 if request.args.len() != 0 {
                     return RespValue::Error {
@@ -189,9 +189,19 @@ impl Server {
                 }
                 RespValue::Integer(self.store.len() as i64)
             }
+            "COMMAND" => RespValue::NullArray,
             _ => RespValue::Error {
                 name: "ERR".to_owned(),
-                msg: format!("unsupported command '{}'", request.cmd),
+                msg: format!(
+                    "unknown command `{}`, with args begining with {}",
+                    request.cmd,
+                    request
+                        .args
+                        .iter()
+                        .map(|x| format!("`{}`", x))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
             },
         }
     }
@@ -341,7 +351,7 @@ impl<B: BufRead> Deserializer<B> {
                 Ok(RespValue::Array(members))
             }
             _ => Err(TinkvError::Custom(
-                "Invalid request, parse failed".to_owned(),
+                "protocol error, parse failed".to_owned(),
             )),
         }
     }
