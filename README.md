@@ -174,7 +174,7 @@ $ tinkv /tmp/db -vvv compact
 - `dbsize`
 - `compact`: extended command to trigger a compaction manually.
 
-Key/value pairs are persisted in log files of directory `/urs/local/var/tinkv`. The default listening address of `tinkv-server` is `127.0.0.1:9815`, and you can connect to it with a redis client.
+Key/value pairs are persisted in log files of directory `/urs/local/var/tinkv`. The default listening address of `tinkv-server` is `127.0.0.1:7379`, and you can connect to it with a redis client.
 
 ### Quick Start
 
@@ -198,7 +198,7 @@ $ tinkv-server -vv
 Communicate with `tinkv-server` by using `reids-cli`:
 
 ```shell
-$ redis-cli -p 9815
+$ redis-cli -p 7379
 127.0.0.1:9815> ping
 PONG
 127.0.0.1:9815> ping "hello, tinkv"

@@ -187,3 +187,13 @@ impl<B: BufRead> Read for ByteLineReader<B> {
         self.reader.read(buf)
     }
 }
+
+impl<B: BufRead> BufRead for ByteLineReader<B> {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        self.reader.fill_buf()
+    }
+
+    fn consume(&mut self, amt: usize) {
+        self.reader.consume(amt);
+    }
+}
