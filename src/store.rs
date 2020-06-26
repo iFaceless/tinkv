@@ -102,7 +102,7 @@ impl Store {
     fn build_keydir_from_hint_file(&mut self, path: &Path) -> Result<()> {
         trace!("build keydir from hint file {}", path.display());
         let mut hint_file = HintFile::new(path, false)?;
-        let hint_file_id = hint_file.id.clone();
+        let hint_file_id = hint_file.id;
 
         for entry in hint_file.entry_iter() {
             let keydir_ent = KeyDirEntry::new(hint_file_id, entry.offset, entry.size);
@@ -137,7 +137,7 @@ impl Store {
                     self.stats.total_stale_entries += 1;
                 }
             } else {
-                let keydir_ent = KeyDirEntry::new(file_id.clone(), entry.offset, entry.size);
+                let keydir_ent = KeyDirEntry::new(file_id, entry.offset, entry.size);
                 let old = self.keydir.insert(entry.key().into(), keydir_ent);
                 if let Some(old_ent) = old {
                     self.stats.size_of_stale_entries += old_ent.size;
@@ -238,8 +238,8 @@ impl Store {
         if df.size > self.config.max_data_file_size {
             info!("size of active data file '{}' exceeds maximum size of {} bytes, switch to another one.", df.path.display(), self.config.max_data_file_size);
 
-            // close current active data file.
-            drop(df);
+            // sync data to disk.
+            let _ = df.sync();
 
             // create a new active data file.
             self.new_active_data_file(None)?;
@@ -271,16 +271,17 @@ impl Store {
             let df = self
                 .data_files
                 .get_mut(&keydir_ent.segment_id)
-                .expect(format!("data file {} not found", &keydir_ent.segment_id).as_str());
+                .unwrap_or_else(|| panic!("data file {} not found", &keydir_ent.segment_id));
             let entry = df.read(keydir_ent.offset)?;
             if !entry.is_valid() {
-                return Err(TinkvError::DataEntryCorrupted {
+                Err(TinkvError::DataEntryCorrupted {
                     file_id: df.id,
                     key: entry.key().into(),
                     offset: entry.offset,
-                });
+                })
+            } else {
+                Ok(Some(entry.value().into()))
             }
-            return Ok(Some(entry.value().into()));
         } else {
             Ok(None)
         }
@@ -429,6 +430,11 @@ impl Store {
         self.keydir.len() as u64
     }
 
+    /// Check datastore is empty or not.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Iterate all keys in datastore and call function `f`
     /// for each entry.
     ///
@@ -560,12 +566,18 @@ pub struct OpenOptions {
     config: Config,
 }
 
-impl OpenOptions {
-    #[allow(dead_code)]
-    pub fn new() -> Self {
+impl Default for OpenOptions {
+    fn default() -> Self {
         Self {
             config: Config::default(),
         }
+    }
+}
+
+impl OpenOptions {
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        Self::default()
     }
 
     #[allow(dead_code)]
@@ -594,6 +606,6 @@ impl OpenOptions {
 
     #[allow(dead_code)]
     pub fn open<P: AsRef<Path>>(&self, path: P) -> Result<Store> {
-        Store::open_with_options(path, self.config.clone())
+        Store::open_with_options(path, self.config)
     }
 }

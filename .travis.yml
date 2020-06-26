@@ -1,5 +1,10 @@
 language: rust
+cache:
+  directories:
+    - target/
+
 script:
+  - rustup component add clippy && cargo clippy
   - cargo test -- --nocapture
 
 after_success: |

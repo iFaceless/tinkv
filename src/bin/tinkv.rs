@@ -1,7 +1,5 @@
 //! TinKV command line app.
-use bytefmt;
-use clap_verbosity_flag;
-use pretty_env_logger;
+use clap_verbosity_flag::Verbosity;
 use std::path::PathBuf;
 use std::process;
 use structopt::{self, StructOpt};
@@ -36,7 +34,7 @@ enum SubCommand {
 )]
 struct Opt {
     #[structopt(flatten)]
-    verbose: clap_verbosity_flag::Verbosity,
+    verbose: Verbosity,
     /// Path to tinkv datastore.
     #[structopt(parse(from_os_str))]
     path: PathBuf,

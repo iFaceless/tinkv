@@ -91,10 +91,7 @@ impl FileWithBufWriter {
     pub fn from(inner: fs::File) -> io::Result<FileWithBufWriter> {
         let bw = BufWriterWithOffset::new(inner.try_clone()?)?;
 
-        Ok(FileWithBufWriter {
-            inner: inner,
-            bw: bw,
-        })
+        Ok(FileWithBufWriter { inner, bw })
     }
 
     pub fn inner(&self) -> &fs::File {
@@ -157,12 +154,12 @@ impl<B: BufRead> ByteLineReader<B> {
     /// Create a new `ByteLineReader` instance from given instance of `BufRead`
     pub fn new(reader: B) -> Self {
         Self {
-            reader: reader,
+            reader,
             buf: Vec::new(),
         }
     }
 
-    pub fn next(&mut self) -> Option<io::Result<&[u8]>> {
+    pub fn next_line(&mut self) -> Option<io::Result<&[u8]>> {
         self.buf.clear();
         match self.reader.read_until(b'\n', &mut self.buf) {
             Ok(0) => None,

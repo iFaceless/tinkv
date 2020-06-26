@@ -131,15 +131,16 @@ impl DataFile {
         // Data name must starts with valid file id.
         let file_id = parse_file_id(path).expect("file id not found in file path");
 
-        let mut w = None;
-        if writeable {
+        let w = if writeable {
             let f = fs::OpenOptions::new()
                 .create(true)
                 .write(true)
                 .append(true)
                 .open(path)?;
-            w = Some(FileWithBufWriter::from(f)?);
-        }
+            Some(FileWithBufWriter::from(f)?)
+        } else {
+            None
+        };
 
         let file = fs::File::open(path)?;
         let size = file.metadata()?.len();
@@ -149,7 +150,7 @@ impl DataFile {
             writeable,
             reader: BufReaderWithOffset::new(file)?,
             writer: w,
-            size: size,
+            size,
         };
 
         Ok(df)
@@ -167,7 +168,7 @@ impl DataFile {
             .as_mut()
             .ok_or_else(|| TinkvError::FileNotWriteable(path.to_path_buf()))?;
         let offset = w.offset();
-        w.write(&encoded)?;
+        w.write_all(&encoded)?;
         w.flush()?;
 
         self.size = offset + encoded.len() as u64;
