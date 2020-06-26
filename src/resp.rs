@@ -3,7 +3,7 @@
 use crate::error::{Result, TinkvError};
 use crate::util::ByteLineReader;
 use log::trace;
-use std::io::BufRead;
+use std::io::{BufRead, Cursor, Write};
 
 macro_rules! repr {
     ($bs:expr) => {
@@ -19,7 +19,14 @@ const BULK_STR_PREFIX: u8 = b'$';
 const ARRAY_PREFIX: u8 = b'*';
 const CR: u8 = b'\r';
 const LF: u8 = b'\n';
-// const CRLF: &[u8] = b"\r\n";
+
+/// For writes
+const WRITE_SIMPLE_STR_PREFIX: &[u8] = b"+";
+const WRITE_ERROR_PREFIX: &[u8] = b"-";
+const WRITE_INTEGER_PREFIX: &[u8] = b":";
+const WRITE_BULK_STR_PREFIX: &[u8] = b"$";
+const WRITE_ARRAY_PREFIX: &[u8] = b"*";
+const WRITE_CRLF_SUFFIX: &[u8] = b"\r\n";
 
 /// Generic RESP error.
 pub(crate) struct Error<'s> {
@@ -74,6 +81,44 @@ impl Default for Value {
 }
 
 impl Value {
+    #[allow(dead_code)]
+    pub fn new_integer(value: i64) -> Self {
+        Self::Integer(value)
+    }
+
+    #[allow(dead_code)]
+    pub fn new_simple_string(value: &str) -> Self {
+        Self::SimpleString(value.to_owned())
+    }
+
+    #[allow(dead_code)]
+    pub fn new_null_bulk_string() -> Self {
+        Self::NullBulkString
+    }
+
+    #[allow(dead_code)]
+    pub fn new_bulk_string(value: Vec<u8>) -> Self {
+        Self::BulkString(value)
+    }
+
+    #[allow(dead_code)]
+    pub fn new_error(name: &str, msg: &str) -> Self {
+        Self::Error {
+            name: name.to_owned(),
+            msg: msg.to_owned(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn new_array(elements: Vec<Value>) -> Self {
+        Self::Array(elements)
+    }
+
+    #[allow(dead_code)]
+    pub fn new_null_array() -> Self {
+        Self::NullArray
+    }
+
     #[allow(dead_code)]
     pub fn is_simple_string(&self) -> bool {
         self.as_simple_string().is_some()
@@ -214,11 +259,22 @@ impl Value {
     }
 }
 
+/// Deserialize RESP values from byte slice and return a value iterator.
+/// Ref: https://github.com/rust-lang/rust/issues/51282
+#[allow(dead_code)]
+pub(crate) fn deserialize_from_slice(value: &[u8]) -> impl Iterator<Item = Result<Value>> + '_ {
+    deserialize_from_reader(Cursor::new(value))
+}
+
+/// Deserialize RESP values from a stream reader and return a value iterator.
+pub(crate) fn deserialize_from_reader<B: BufRead>(
+    reader: B,
+) -> impl Iterator<Item = Result<Value>> {
+    Deserializer::from_reader(reader).into_iter()
+}
+
 #[derive(Debug)]
-pub(crate) struct Deserializer<B>
-where
-    B: BufRead,
-{
+pub(crate) struct Deserializer<B> {
     inner: ByteLineReader<B>,
     buf: Vec<u8>,
 }
@@ -244,8 +300,11 @@ where
         match self.next_line()? {
             None => Ok(None),
             Some(line) => {
-                let v = self.next_value(&line)?;
-                Ok(Some(v))
+                if line.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(self.next_value(&line)?))
+                }
             }
         }
     }
@@ -326,6 +385,114 @@ where
             Ok(Some(v)) => Some(Ok(v)),
             Err(e) => Some(Err(e)),
         }
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn serialize_to_bytes(value: &Value) -> Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    let mut c = Cursor::new(&mut buf);
+    serialize_to_writer(&mut c, value)?;
+    c.flush()?;
+    Ok(buf)
+}
+
+#[allow(dead_code)]
+pub(crate) fn serialize_to_writer<W>(writer: &mut W, value: &Value) -> Result<()>
+where
+    W: Write,
+{
+    Serializer::new(writer).serialize(value)
+}
+
+#[derive(Debug)]
+pub(crate) struct Serializer<W> {
+    writer: W,
+}
+
+impl<W> Serializer<W>
+where
+    W: Write,
+{
+    pub fn new(writer: W) -> Self {
+        Self { writer }
+    }
+
+    #[inline]
+    #[allow(dead_code)]
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
+
+    pub fn serialize(&mut self, value: &Value) -> Result<()> {
+        match value {
+            Value::SimpleString(s) => self.serialize_simple_string(s.as_ref()),
+            Value::Integer(i) => self.serialize_integer(i.to_owned()),
+            Value::Error { name, msg } => self.serialize_error(&name, &msg),
+            Value::BulkString(s) => self.serialize_bulk_string(s.as_ref()),
+            Value::Array(v) => self.serialize_array(v.as_ref()),
+            Value::NullArray => self.serialize_null_array(),
+            Value::NullBulkString => self.serialize_null_bulk_string(),
+        }
+    }
+
+    pub fn serialize_simple_string(&mut self, value: &str) -> Result<()> {
+        self.writer.write_all(WRITE_SIMPLE_STR_PREFIX)?;
+        self.writer.write_all(value.as_bytes())?;
+        self.end()
+    }
+
+    pub fn serialize_error(&mut self, name: &str, msg: &str) -> Result<()> {
+        self.writer.write_all(WRITE_ERROR_PREFIX)?;
+        if name == "" {
+            self.writer.write_all(b"ERR")?;
+        } else {
+            self.writer.write_all(name.as_bytes())?;
+        }
+        self.writer.write_all(b" ")?;
+        self.writer.write_all(msg.as_bytes())?;
+        self.end()
+    }
+
+    pub fn serialize_integer(&mut self, value: i64) -> Result<()> {
+        self.writer.write_all(WRITE_INTEGER_PREFIX)?;
+        self.writer.write_all(value.to_string().as_bytes())?;
+        self.end()
+    }
+
+    pub fn serialize_bulk_string(&mut self, value: &[u8]) -> Result<()> {
+        self.writer.write_all(WRITE_BULK_STR_PREFIX)?;
+        self.writer.write_all(value.len().to_string().as_bytes())?;
+        self.writer.write_all(WRITE_CRLF_SUFFIX)?;
+        self.writer.write_all(value)?;
+        self.end()
+    }
+
+    pub fn serialize_array(&mut self, value: &Vec<Value>) -> Result<()> {
+        self.writer.write_all(WRITE_ARRAY_PREFIX)?;
+        self.writer.write_all(value.len().to_string().as_bytes())?;
+        self.writer.write_all(WRITE_CRLF_SUFFIX)?;
+        for elem in value.iter() {
+            self.serialize(elem)?;
+        }
+        Ok(())
+    }
+
+    pub fn serialize_null_bulk_string(&mut self) -> Result<()> {
+        self.writer.write_all(WRITE_BULK_STR_PREFIX)?;
+        self.writer.write_all(b"-1")?;
+        self.end()
+    }
+
+    pub fn serialize_null_array(&mut self) -> Result<()> {
+        self.writer.write_all(WRITE_ARRAY_PREFIX)?;
+        self.writer.write_all(b"-1")?;
+        self.end()
+    }
+
+    fn end(&mut self) -> Result<()> {
+        self.writer.write_all(WRITE_CRLF_SUFFIX)?;
+        Ok(())
     }
 }
 
@@ -468,5 +635,76 @@ mod tests {
         assert!(r.is_err());
         let r = parse_value("*3\r\n:1\n");
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_deserialize_from_slice() {
+        let values: Vec<Result<Value>> =
+            deserialize_from_slice(b"+OK\r\n:100\r\n$5\r\nhello\r\n").collect();
+        assert_eq!(values.len(), 3);
+
+        let mut it = values.into_iter();
+        assert_eq!(
+            it.next().unwrap().unwrap().as_simple_string().unwrap(),
+            "OK"
+        );
+        assert_eq!(it.next().unwrap().unwrap().as_integer().unwrap(), 100);
+        assert_eq!(
+            it.next().unwrap().unwrap().as_bulk_string().unwrap(),
+            "hello".as_bytes()
+        );
+    }
+
+    #[test]
+    fn test_serialize_simple_string() {
+        let r = serialize_to_bytes(&Value::new_simple_string("hello, world"));
+        assert!(r.is_ok());
+        assert_eq!(r.unwrap(), b"+hello, world\r\n");
+    }
+
+    #[test]
+    fn test_serialize_integer() {
+        let r = serialize_to_bytes(&Value::new_integer(100));
+        assert!(r.is_ok());
+        assert_eq!(r.unwrap(), b":100\r\n");
+    }
+
+    #[test]
+    fn test_serialize_error() {
+        let r = serialize_to_bytes(&Value::new_error("MYERR", "error occurs"));
+        assert!(r.is_ok());
+        assert_eq!(r.unwrap(), b"-MYERR error occurs\r\n");
+    }
+
+    #[test]
+    fn test_serialize_null_bulk_string() {
+        let r = serialize_to_bytes(&Value::new_null_bulk_string());
+        assert!(r.is_ok());
+        assert_eq!(r.unwrap(), b"$-1\r\n");
+    }
+
+    #[test]
+    fn test_serialize_bulk_string() {
+        let r = serialize_to_bytes(&Value::new_bulk_string(b"hello".to_vec()));
+        assert!(r.is_ok());
+        assert_eq!(repr!(&r.unwrap()), "$5\r\nhello\r\n");
+    }
+
+    #[test]
+    fn test_serialize_null_array() {
+        let r = serialize_to_bytes(&Value::new_null_array());
+        assert!(r.is_ok());
+        assert_eq!(r.unwrap(), b"*-1\r\n");
+    }
+
+    #[test]
+    fn test_serialize_array() {
+        let r = serialize_to_bytes(&Value::new_array(vec![
+            Value::new_integer(1),
+            Value::new_simple_string("hello"),
+            Value::new_bulk_string(b"world".to_vec()),
+        ]));
+        assert!(r.is_ok());
+        assert_eq!(repr!(&r.unwrap()), "*3\r\n:1\r\n+hello\r\n$5\r\nworld\r\n");
     }
 }

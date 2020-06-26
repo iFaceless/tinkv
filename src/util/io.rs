@@ -145,7 +145,7 @@ const LINE_FEED: &[u8] = b"\n";
 ///
 /// Ref: https://github.com/whitfin/bytelines/blob/master/src/lib.rs
 #[derive(Debug)]
-pub struct ByteLineReader<B: BufRead> {
+pub struct ByteLineReader<B> {
     reader: B,
     buf: Vec<u8>,
 }
