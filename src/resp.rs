@@ -22,10 +22,30 @@ const CR: u8 = b'\r';
 const LF: u8 = b'\n';
 const CRLF: &[u8] = b"\r\n";
 
+/// Generic RESP error.
+pub(crate) struct Error<'s> {
+    name: &'s str,
+    msg: &'s str,
+}
+
+impl<'s> Error<'s> {
+    pub fn new(name: &'s str, msg: &'s str) -> Self {
+        Self { name, msg }
+    }
+
+    #[allow(dead_code)]
+    pub fn as_error_value(&self) -> Value {
+        Value::Error {
+            name: self.name.to_owned(),
+            msg: self.msg.to_owned(),
+        }
+    }
+}
+
 /// RESP value types. In RESP, different parts
 /// of the protocol are always terminated with `\r\n`.
-#[derive(Debug, Clone)]
-pub enum Value {
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Value {
     /// Simple strings are used to transmit non binary safee strings
     /// with minimal overhead.
     SimpleString(String),
@@ -55,13 +75,102 @@ impl Default for Value {
 }
 
 impl Value {
+    #[allow(dead_code)]
+    pub fn is_simple_string(&self) -> bool {
+        self.as_simple_string().is_some()
+    }
+
+    pub fn as_simple_string(&self) -> Option<&str> {
+        match self {
+            Value::SimpleString(s) => Some(&s),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_error(&self) -> bool {
+        self.as_error().is_some()
+    }
+
+    pub fn as_error(&self) -> Option<Error> {
+        match self {
+            Value::Error { name, msg } => Some(Error::new(name, msg)),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_integer(&self) -> bool {
+        self.as_integer().is_some()
+    }
+
+    pub fn as_integer(&self) -> Option<i64> {
+        match self {
+            Value::Integer(i) => Some(*i),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_bulk_string(&self) -> bool {
+        self.as_bulk_string().is_some()
+    }
+
+    pub fn as_bulk_string(&self) -> Option<&[u8]> {
+        match self {
+            Value::BulkString(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_array(&self) -> bool {
+        self.as_array().is_some()
+    }
+
+    pub fn as_array(&self) -> Option<&Vec<Value>> {
+        match self {
+            Value::Array(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_null(&self) -> bool {
+        self.is_null_array() || self.is_null_bulk_string()
+    }
+
+    #[allow(dead_code)]
+    pub fn is_null_bulk_string(&self) -> bool {
+        self.as_null_bulk_string().is_some()
+    }
+
+    pub fn as_null_bulk_string(&self) -> Option<()> {
+        match self {
+            Value::NullBulkString => Some(()),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_null_array(&self) -> bool {
+        self.as_null_array().is_some()
+    }
+
+    pub fn as_null_array(&self) -> Option<()> {
+        match self {
+            Value::NullArray => Some(()),
+            _ => None,
+        }
+    }
+
     fn simple_string_from_slice(value: &[u8]) -> Value {
         let s = String::from_utf8_lossy(value);
         Value::SimpleString(s.into())
     }
 
     fn error_from_slice(value: &[u8]) -> Value {
-        let s = String::from_utf8_lossy(&value[1..]).to_string();
+        let s = String::from_utf8_lossy(value).to_string();
         let mut name = "ERR".to_owned();
         let msg;
         if let Some(idx) = s.find(char::is_whitespace) {
@@ -74,7 +183,7 @@ impl Value {
     }
 
     fn integer_from_slice(value: &[u8]) -> Result<Value> {
-        let s = String::from_utf8_lossy(&value[1..]).to_string();
+        let s = String::from_utf8_lossy(value).to_string();
         let v = s.parse::<i64>()?;
         Ok(Value::Integer(v))
     }
@@ -87,22 +196,27 @@ impl Value {
         let mut buf = vec![0u8; length as usize + 2]; // extra 2 bytes for `\r\n`
         reader.read_exact(&mut buf)?;
 
+        let err = Err(TinkvError::Protocol(
+            "protocol error, length of bulk string is not long enough".to_string(),
+        ));
+
         if buf.last().unwrap() == &LF {
             buf.pop();
             if buf.last().unwrap() == &CR {
                 buf.pop();
+            } else {
+                return err;
             }
+
             Ok(Value::BulkString(buf))
         } else {
-            Err(TinkvError::Protocol(
-                "protocol error, expect CRLF".to_string(),
-            ))
+            return err;
         }
     }
 }
 
 #[derive(Debug)]
-pub struct Deserializer<B>
+pub(crate) struct Deserializer<B>
 where
     B: BufRead,
 {
@@ -114,16 +228,6 @@ impl<B> Deserializer<B>
 where
     B: BufRead,
 {
-    // #[allow(dead_code)]
-    // pub fn from_slice(v: &[u8]) -> Self {
-
-    // }
-
-    // #[allow(dead_code)]
-    // pub fn from_str(v: &str) -> Self {
-
-    // }
-
     #[allow(dead_code)]
     pub fn from_reader(inner: B) -> Self {
         Self {
@@ -151,22 +255,24 @@ where
         match self.inner.next() {
             None => return Ok(None),
             Some(Err(e)) => Err(e.into()),
-            // TODO: avoid copy
+            // TODO: optimize later, avoid copying
             Some(Ok(v)) => Ok(Some(v.to_vec())),
         }
     }
 
     fn next_value(&mut self, value_line: &[u8]) -> Result<Value> {
         trace!("receive value line {}", repr!(value_line));
+        let remaining = &value_line[1..];
         match value_line[0] {
-            SIMPLE_STR_PREFIX => Ok(Value::simple_string_from_slice(&value_line[1..])),
-            ERROR_PREFIX => Ok(Value::error_from_slice(&value_line[1..])),
-            INTEGER_PREFIX => Value::integer_from_slice(&value_line[1..]),
+            SIMPLE_STR_PREFIX => Ok(Value::simple_string_from_slice(remaining)),
+            ERROR_PREFIX => Ok(Value::error_from_slice(remaining)),
+            INTEGER_PREFIX => Value::integer_from_slice(remaining),
             BULK_STR_PREFIX => {
-                Value::bulk_string_from_slice(parse_length(&value_line[1..])?, &mut self.inner)
+                Value::bulk_string_from_slice(parse_length(remaining)?, &mut self.inner)
             }
             ARRAY_PREFIX => {
-                let len = parse_length(&value_line[1..])?;
+                let len = parse_length(remaining)?;
+
                 if len == -1 {
                     return Ok(Value::NullArray);
                 }
@@ -184,10 +290,10 @@ where
                 Ok(Value::Array(elements))
             }
             _ => {
-                // plain text
+                // TODO: fallback to extract from plain text
                 Err(TinkvError::Protocol(format!(
                     "invalid data type prefix: {}",
-                    repr!(&value_line[..1])
+                    repr!(remaining)
                 )))
             }
         }
@@ -195,12 +301,14 @@ where
 }
 
 fn parse_length(value: &[u8]) -> Result<i64> {
-    let len = String::from_utf8_lossy(value).to_string().parse()?;
-    Ok(len)
+    let s = String::from_utf8_lossy(value).to_string();
+    s.parse().map_err(|_| {
+        TinkvError::Protocol(format!("protocol error, cannot parse length from {}", s))
+    })
 }
 
 #[derive(Debug)]
-pub struct ValueIter<B>
+pub(crate) struct ValueIter<B>
 where
     B: BufRead,
 {
@@ -219,5 +327,131 @@ where
             Ok(Some(v)) => Some(Ok(v)),
             Err(e) => Some(Err(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn parse_value(value: &str) -> Result<Option<Value>> {
+        let reader = Cursor::new(value.as_bytes());
+        let mut de = Deserializer::from_reader(reader);
+        let v = de.next()?;
+        Ok(v)
+    }
+
+    #[test]
+    fn test_simple_string() {
+        let r = parse_value("+OK\r\n");
+        assert!(r.is_ok());
+        let v = r.unwrap().unwrap();
+        assert!(v.is_simple_string());
+        assert_eq!(v.as_simple_string().unwrap(), "OK");
+    }
+
+    #[test]
+    fn test_error() {
+        let r = parse_value("-CUSTOMERR error message\r\n");
+        assert!(r.is_ok());
+
+        let v = r.unwrap().unwrap();
+        assert!(v.is_error());
+
+        let e = v.as_error().unwrap();
+        assert_eq!(e.name, "CUSTOMERR");
+        assert_eq!(e.msg, "error message");
+    }
+
+    #[test]
+    fn test_integer() {
+        let r = parse_value(":1234567\r\n");
+        assert!(r.is_ok());
+
+        let v = r.unwrap().unwrap();
+        assert!(v.is_integer());
+
+        let r = v.as_integer().unwrap();
+        assert_eq!(r, 1234567);
+    }
+
+    #[test]
+    fn test_bulk_string() {
+        let r = parse_value("$5\r\nhello\r\n");
+        assert!(r.is_ok());
+
+        let v = r.unwrap().unwrap();
+        assert!(v.is_bulk_string());
+
+        let r = v.as_bulk_string().unwrap();
+        assert_eq!(r, "hello".as_bytes());
+
+        // null string
+        let r = parse_value("$-1\r\n");
+        assert!(r.is_ok());
+
+        let v = r.unwrap().unwrap();
+        assert!(v.is_null_bulk_string());
+        assert!(v.is_null());
+    }
+
+    #[test]
+    fn test_invalid_bulk_string() {
+        let r = parse_value("$5\r\nhell\r\n");
+        assert!(r.is_err());
+
+        let r = parse_value("$5\r\nhello\r");
+        assert!(r.is_err());
+
+        let r = parse_value("$5\r\nhello\n\r");
+        assert!(r.is_err());
+
+        let r = parse_value("$5\rhello\n\r");
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_array() {
+        let r = parse_value("*1\r\n:1\r\n");
+        assert!(r.is_ok());
+        let v = r.unwrap().unwrap();
+        assert!(v.is_array());
+        let r = v.as_array().unwrap();
+        assert_eq!(r.len(), 1);
+        assert_eq!(r.get(0).unwrap().as_integer().unwrap(), 1);
+
+        let r = parse_value("*2\r\n:1\r\n$5\r\ntinkv\r\n");
+        assert!(r.is_ok());
+        let v = r.unwrap().unwrap();
+        assert!(v.is_array());
+        let r = v.as_array().unwrap();
+        assert_eq!(r.len(), 2);
+        assert_eq!(r.get(0).unwrap().as_integer().unwrap(), 1);
+        assert_eq!(r.get(1).unwrap().as_bulk_string().unwrap(), "tinkv".as_bytes());
+
+        let r = parse_value("*3\r\n:1\r\n$5\r\ntinkv\r\n+OK\r\n");
+        assert!(r.is_ok());
+        let v = r.unwrap().unwrap();
+        assert!(v.is_array());
+        let r = v.as_array().unwrap();
+        assert_eq!(r.len(), 3);
+        assert_eq!(r.get(0).unwrap().as_integer().unwrap(), 1);
+        assert_eq!(r.get(1).unwrap().as_bulk_string().unwrap(), "tinkv".as_bytes());
+        assert_eq!(r.get(2).unwrap().as_simple_string().unwrap(), "OK");
+
+        let r = parse_value("*-1\r\n");
+        assert!(r.is_ok());
+        let v = r.unwrap().unwrap();
+        assert!(v.is_null());
+        assert!(v.is_null_array());
+    }
+
+    #[test]
+    fn test_invalid_array() {
+        let r = parse_value("*3\r\n:1\r\n");
+        assert!(r.is_err());
+        let r = parse_value("*3\r\n:1\n");
+        assert!(r.is_err());
     }
 }
