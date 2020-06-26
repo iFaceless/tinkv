@@ -3,8 +3,7 @@
 use crate::error::{Result, TinkvError};
 use crate::util::ByteLineReader;
 use log::trace;
-use std::io::prelude::*;
-use std::io::{self, BufRead, BufReader, BufWriter, Cursor};
+use std::io::BufRead;
 
 macro_rules! repr {
     ($bs:expr) => {
@@ -20,7 +19,7 @@ const BULK_STR_PREFIX: u8 = b'$';
 const ARRAY_PREFIX: u8 = b'*';
 const CR: u8 = b'\r';
 const LF: u8 = b'\n';
-const CRLF: &[u8] = b"\r\n";
+// const CRLF: &[u8] = b"\r\n";
 
 /// Generic RESP error.
 pub(crate) struct Error<'s> {
@@ -210,7 +209,7 @@ impl Value {
 
             Ok(Value::BulkString(buf))
         } else {
-            return err;
+            err
         }
     }
 }
@@ -252,8 +251,8 @@ where
     }
 
     fn next_line(&mut self) -> Result<Option<Vec<u8>>> {
-        match self.inner.next() {
-            None => return Ok(None),
+        match self.inner.next_line() {
+            None => Ok(None),
             Some(Err(e)) => Err(e.into()),
             // TODO: optimize later, avoid copying
             Some(Ok(v)) => Ok(Some(v.to_vec())),

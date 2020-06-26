@@ -1,5 +1,4 @@
 //! Define some helper functions.
-use crc;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 

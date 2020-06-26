@@ -81,12 +81,10 @@ impl Server {
             "PING" => match request.args.len() {
                 0 => RespValue::SimpleStr("PONG".to_owned()),
                 1 => RespValue::BulkStr(request.args.get(0).unwrap().to_owned()),
-                _ => {
-                    return RespValue::Error {
-                        name: "ERR".to_owned(),
-                        msg: "wrong number of arguments for 'ping' command".to_owned(),
-                    }
-                }
+                _ => RespValue::Error {
+                    name: "ERR".to_owned(),
+                    msg: "wrong number of arguments for 'ping' command".to_owned(),
+                },
             },
             "GET" => {
                 if request.args.len() != 1 {
@@ -96,11 +94,9 @@ impl Server {
                     };
                 }
                 match self.store.get(request.args.get(0).unwrap().as_bytes()) {
-                    Ok(v) => {
-                        return v
-                            .map(|x| RespValue::BulkStr(String::from_utf8_lossy(&x).to_string()))
-                            .unwrap_or_else(|| RespValue::NullBulkStr);
-                    }
+                    Ok(v) => v
+                        .map(|x| RespValue::BulkStr(String::from_utf8_lossy(&x).to_string()))
+                        .unwrap_or_else(|| RespValue::NullBulkStr),
                     Err(e) => RespValue::Error {
                         name: "STOREERR".to_owned(),
                         msg: format!("{}", e),
@@ -141,7 +137,7 @@ impl Server {
                 }
             }
             "COMPACT" => {
-                if request.args.len() != 0 {
+                if !request.args.is_empty() {
                     return RespValue::Error {
                         name: "ERR".to_owned(),
                         msg: "wrong number of arguments for 'compact' command".to_owned(),
@@ -165,23 +161,23 @@ impl Server {
 
                 let pattern: &String = request.args.get(0).unwrap();
                 let mut resp: Vec<RespValue> = Vec::new();
-                if pattern.ends_with("*") {
+                if pattern.ends_with('*') {
                     let prefix = pattern.trim_end_matches('*').as_bytes();
                     for k in self.store.keys() {
-                        if prefix.len() == 0 || k.starts_with(prefix) {
+                        if prefix.is_empty() || k.starts_with(prefix) {
                             // collect keys
                             resp.push(RespValue::BulkStr(String::from_utf8_lossy(k).into()));
                         }
                     }
                 }
-                if resp.len() == 0 {
+                if resp.is_empty() {
                     return RespValue::NullArray;
                 }
 
-                return RespValue::Array(resp);
+                RespValue::Array(resp)
             }
             "DBSIZE" => {
-                if request.args.len() != 0 {
+                if !request.args.is_empty() {
                     return RespValue::Error {
                         name: "ERR".to_owned(),
                         msg: "wrong number of arguments for 'dbsize' command".to_owned(),
@@ -254,22 +250,19 @@ enum RespValue {
 impl RespValue {
     fn serialize(&self) -> String {
         match self {
-            RespValue::SimpleStr(s) => {
-                return format!("+{}\r\n", s);
-            }
-            RespValue::Error { name, msg } => {
-                return format!("-{} {}\r\n", name, msg);
-            }
-            RespValue::Integer(i) => {
-                return format!(":{}\r\n", i);
-            }
+            RespValue::SimpleStr(s) => format!("+{}\r\n", s),
+            RespValue::Error { name, msg } => format!("-{} {}\r\n", name, msg),
+            RespValue::Integer(i) => format!(":{}\r\n", i),
             RespValue::BulkStr(s) => {
-                assert!(s.len() > 0, "non-empty bulk string need at least one char");
-                return format!("${}\r\n{}\r\n", s.len(), s);
+                assert!(
+                    !s.is_empty(),
+                    "non-empty bulk string need at least one char"
+                );
+                format!("${}\r\n{}\r\n", s.len(), s)
             }
             RespValue::Array(members) => {
                 assert!(
-                    members.len() > 0,
+                    !members.is_empty(),
                     "non-empty array need at least one element"
                 );
                 let mut s: Vec<String> = Vec::new();
@@ -278,12 +271,8 @@ impl RespValue {
                 }
                 format!("*{}\r\n{}", members.len(), s.join(""))
             }
-            RespValue::NullBulkStr => {
-                return "$-1\r\n".to_owned();
-            }
-            RespValue::NullArray => {
-                return "*-1\r\n".to_owned();
-            }
+            RespValue::NullBulkStr => "$-1\r\n".to_owned(),
+            RespValue::NullArray => "*-1\r\n".to_owned(),
         }
     }
 }
@@ -362,7 +351,7 @@ impl<B: BufRead> Iterator for Deserializer<B> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let reader = &mut self.reader;
-        let bytes = match reader.next() {
+        let bytes = match reader.next_line() {
             None => return None,
             Some(Err(e)) => return Some(Err(e.into())),
             // TODO: avoid data copying.

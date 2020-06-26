@@ -2,7 +2,6 @@
 //! should bind with a hint file for faster loading.
 use crate::error::Result;
 use crate::util::{parse_file_id, FileWithBufWriter};
-use bincode;
 use log::{error, trace};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -49,22 +48,23 @@ impl HintFile {
         // File name must starts with valid file id.
         let file_id = parse_file_id(path).expect("file id not found in file path");
 
-        let mut w = None;
-        if writeable {
+        let w = if writeable {
             let f = fs::OpenOptions::new()
                 .create(true)
                 .write(true)
                 .append(true)
                 .open(path)?;
 
-            w = Some(FileWithBufWriter::from(f)?);
-        }
+            Some(FileWithBufWriter::from(f)?)
+        } else {
+            None
+        };
 
         Ok(Self {
             path: path.to_path_buf(),
             id: file_id,
             entries_written: 0,
-            writeable: writeable,
+            writeable,
             writer: w,
             reader: BufReader::new(File::open(path)?),
         })

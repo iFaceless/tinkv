@@ -1,11 +1,9 @@
 //! TinKV server is a redis-compatible storage server.
-use clap_verbosity_flag;
 use clap_verbosity_flag::Verbosity;
 use std::error::Error;
 use std::net::SocketAddr;
 
 use log::debug;
-use pretty_env_logger;
 use structopt::StructOpt;
 use tinkv::{config, OpenOptions, Server};
 

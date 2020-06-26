@@ -1,3 +1,7 @@
+[![Build Status](https://travis-ci.org/iFaceless/tinkv.svg?branch=master)](https://travis-ci.org/iFaceless/tinkv)
+[![tinkv](http://meritbadge.herokuapp.com/tinkv)](https://crates.io/crates/tinkv)
+[![License: MIT OR Apache-2.0](https://img.shields.io/crates/l/tinkv.svg)](#license)
+
 # ![TinKV Logo](https://i.loli.net/2020/06/08/3hYVFNurxGoLei7.jpg)
 
 [TinKV](https://github.com/iFaceless/tinkv) is a simple and fast key-value storage engine written in Rust. Inspired by [basho/bitcask](https://github.com/basho/bitcask), written after attending the [Talent Plan courses](https://github.com/pingcap/talent-plan). 
@@ -269,3 +273,7 @@ Found another simple key-value database based on Bitcask model, please refer [xu
 ## Issues
 - [Expected type parameter, found struct](https://stackoverflow.com/questions/26049939/expected-type-parameter-found-struct)
 - [Help understanding how trait bounds workd](https://users.rust-lang.org/t/help-understanding-how-trait-bounds-work/19253/3)
+
+# License
+
+Licensed under the [MIT license](./LICENSE).
