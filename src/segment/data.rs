@@ -306,7 +306,7 @@ mod tests {
     #[test]
     fn test_new_entry() {
         let ent = InnerEntry::new(&b"key".to_vec(), &b"value".to_vec());
-        assert_eq!(ent.checksum, 3327521766);
+        assert_eq!(ent.checksum, 494360628);
     }
 
     #[test]
