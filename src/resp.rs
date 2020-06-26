@@ -343,6 +343,16 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_length() {
+        let v = parse_length("123".as_bytes());
+        assert!(v.is_ok());
+        assert_eq!(v.unwrap(), 123);
+
+        let v = parse_length("123abc".as_bytes());
+        assert!(v.is_err());
+    }
+
+    #[test]
     fn test_simple_string() {
         let r = parse_value("+OK\r\n");
         assert!(r.is_ok());
@@ -428,7 +438,10 @@ mod tests {
         let r = v.as_array().unwrap();
         assert_eq!(r.len(), 2);
         assert_eq!(r.get(0).unwrap().as_integer().unwrap(), 1);
-        assert_eq!(r.get(1).unwrap().as_bulk_string().unwrap(), "tinkv".as_bytes());
+        assert_eq!(
+            r.get(1).unwrap().as_bulk_string().unwrap(),
+            "tinkv".as_bytes()
+        );
 
         let r = parse_value("*3\r\n:1\r\n$5\r\ntinkv\r\n+OK\r\n");
         assert!(r.is_ok());
@@ -437,7 +450,10 @@ mod tests {
         let r = v.as_array().unwrap();
         assert_eq!(r.len(), 3);
         assert_eq!(r.get(0).unwrap().as_integer().unwrap(), 1);
-        assert_eq!(r.get(1).unwrap().as_bulk_string().unwrap(), "tinkv".as_bytes());
+        assert_eq!(
+            r.get(1).unwrap().as_bulk_string().unwrap(),
+            "tinkv".as_bytes()
+        );
         assert_eq!(r.get(2).unwrap().as_simple_string().unwrap(), "OK");
 
         let r = parse_value("*-1\r\n");
