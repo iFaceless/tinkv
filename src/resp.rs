@@ -473,7 +473,7 @@ where
         self.end()
     }
 
-    pub fn serialize_array(&mut self, value: &Vec<Value>) -> Result<()> {
+    pub fn serialize_array(&mut self, value: &[Value]) -> Result<()> {
         self.write(WRITE_ARRAY_PREFIX)?;
         self.write(value.len().to_string().as_bytes())?;
         self.write(WRITE_CRLF_SUFFIX)?;
