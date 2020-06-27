@@ -2,7 +2,7 @@
 [![tinkv](http://meritbadge.herokuapp.com/tinkv)](https://crates.io/crates/tinkv)
 [![License: MIT OR Apache-2.0](https://img.shields.io/crates/l/tinkv.svg)](#license)
 
-# ![TinKV Logo](https://i.loli.net/2020/06/08/3hYVFNurxGoLei7.jpg)
+# ![TinKV Logo](https://pic3.zhimg.com/80/v2-3a50e948ca1b35f311747591b1e854d1_1440w.png)
 
 [TinKV](https://github.com/iFaceless/tinkv) is a simple and fast key-value storage engine written in Rust. Inspired by [basho/bitcask](https://github.com/basho/bitcask), written after attending the [Talent Plan courses](https://github.com/pingcap/talent-plan). 
 
@@ -12,9 +12,9 @@
 
 Happy hacking~
 
-![Overview.jpg](https://i.loli.net/2020/06/25/zXkiSZ5fvjGtQDg.jpg)
+![Overview.jpg](https://pic4.zhimg.com/80/v2-be29d9457a0d31409649eae4cfe743b4_1440w.png)
 
-![Engine.jpg](https://i.loli.net/2020/06/25/cEw9gsrDVJCzyTO.jpg)
+![Engine.jpg](https://pic4.zhimg.com/80/v2-f1e850d2af2db3543a3543b0c6e92f59_1440w.png)
 
 # Features
 
