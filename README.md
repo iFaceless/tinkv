@@ -174,6 +174,9 @@ $ tinkv /tmp/db -vvv compact
 - `set <key> <value>`
 - `del <key>`
 - `ping [<message>]`
+- `exists <key>`
+- `info`
+- `command`
 - `keys <pattern>`
 - `dbsize`
 - `compact`: extended command to trigger a compaction manually.

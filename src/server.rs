@@ -1,6 +1,4 @@
-//! TinKV server listens at specific address, and serves
-//! any request, returns an response to the client.
-//! Communicate with client using a redis-compatible protocol.
+//! TinKV server is a redis-compatible key value server.
 
 use crate::error::{Result, TinkvError};
 
@@ -17,7 +15,7 @@ use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 
 lazy_static! {
     static ref COMMANDS: Vec<&'static str> =
-        vec!["ping", "get", "set", "del", "dbsize", "compact", "command",];
+        vec!["ping", "get", "set", "del", "dbsize", "exists", "compact", "info", "command",];
 }
 
 pub struct Server {
@@ -88,6 +86,9 @@ impl Server {
             "set" => send!(self.handle_set(&args)),
             "del" => send!(self.handle_del(&args)),
             "dbsize" => send!(self.handle_dbsize(&args)),
+            "exists" => send!(self.handle_exists(&args)),
+            "compact" => send!(self.handle_compact(&args)),
+            "info" => send!(self.handle_info(&args)),
             "command" => send!(self.handle_command(&args)),
             _ => {
                 conn.write_value(Value::new_error(
@@ -102,7 +103,7 @@ impl Server {
         Ok(())
     }
 
-    fn handle_ping(&mut self, args: &Vec<&[u8]>) -> Result<Value> {
+    fn handle_ping(&mut self, args: &[&[u8]]) -> Result<Value> {
         match args.len() {
             0 => Ok(Value::new_simple_string("PONG")),
             1 => Ok(Value::new_bulk_string(args[0].to_vec())),
@@ -110,7 +111,7 @@ impl Server {
         }
     }
 
-    fn handle_get(&mut self, args: &Vec<&[u8]>) -> Result<Value> {
+    fn handle_get(&mut self, args: &[&[u8]]) -> Result<Value> {
         if args.len() != 1 {
             return Err(TinkvError::resp_wrong_num_of_args("get"));
         }
@@ -118,43 +119,39 @@ impl Server {
         Ok(self
             .store
             .get(args[0])?
-            .and_then(|x| Some(Value::new_bulk_string(x)))
-            .unwrap_or(Value::new_null_bulk_string()))
+            .map(Value::new_bulk_string)
+            .unwrap_or_else(Value::new_null_bulk_string))
     }
 
-    fn handle_set(&mut self, args: &Vec<&[u8]>) -> Result<Value> {
+    fn handle_set(&mut self, args: &[&[u8]]) -> Result<Value> {
         if args.len() < 2 {
             return Err(TinkvError::resp_wrong_num_of_args("set"));
         }
 
         match self.store.set(args[0], args[1]) {
-            Ok(()) => return Ok(Value::new_simple_string("OK")),
-            Err(e) => {
-                return Err(TinkvError::new_resp_common(
-                    "INTERNALERR",
-                    &format!("{}", e),
-                ))
-            }
+            Ok(()) => Ok(Value::new_simple_string("OK")),
+            Err(e) => Err(TinkvError::new_resp_common(
+                "INTERNALERR",
+                &format!("{}", e),
+            )),
         }
     }
 
-    fn handle_del(&mut self, args: &Vec<&[u8]>) -> Result<Value> {
+    fn handle_del(&mut self, args: &[&[u8]]) -> Result<Value> {
         if args.len() != 1 {
             return Err(TinkvError::resp_wrong_num_of_args("del"));
         }
 
         match self.store.remove(args[0]) {
-            Ok(()) => return Ok(Value::new_simple_string("OK")),
-            Err(e) => {
-                return Err(TinkvError::new_resp_common(
-                    "INTERNALERR",
-                    &format!("{}", e),
-                ))
-            }
+            Ok(()) => Ok(Value::new_simple_string("OK")),
+            Err(e) => Err(TinkvError::new_resp_common(
+                "INTERNALERR",
+                &format!("{}", e),
+            )),
         }
     }
 
-    fn handle_dbsize(&mut self, args: &Vec<&[u8]>) -> Result<Value> {
+    fn handle_dbsize(&mut self, args: &[&[u8]]) -> Result<Value> {
         if !args.is_empty() {
             return Err(TinkvError::resp_wrong_num_of_args("dbsize"));
         }
@@ -162,7 +159,76 @@ impl Server {
         Ok(Value::new_integer(self.store.len() as i64))
     }
 
-    fn handle_command(&mut self, args: &Vec<&[u8]>) -> Result<Value> {
+    fn handle_exists(&mut self, args: &[&[u8]]) -> Result<Value> {
+        if args.len() != 1 {
+            return Err(TinkvError::resp_wrong_num_of_args("exists"));
+        }
+
+        Ok(Value::new_integer(self.store.contains_key(args[0]) as i64))
+    }
+
+    fn handle_compact(&mut self, args: &[&[u8]]) -> Result<Value> {
+        if !args.is_empty() {
+            return Err(TinkvError::resp_wrong_num_of_args("compact"));
+        }
+
+        match self.store.compact() {
+            Ok(_) => Ok(Value::new_simple_string("OK")),
+            Err(e) => Err(TinkvError::new_resp_common(
+                "INTERNALERR",
+                &format!("{}", e),
+            )),
+        }
+    }
+
+    fn handle_info(&mut self, args: &[&[u8]]) -> Result<Value> {
+        if !args.is_empty() {
+            return Err(TinkvError::resp_wrong_num_of_args("info"));
+        }
+
+        let mut info = String::new();
+        info.push_str("# Server\n");
+        info.push_str(&format!("# tinkv_version: {}\n", env!("CARGO_PKG_VERSION")));
+        let os = os_info::get();
+        info.push_str(&format!(
+            "os: {}, {}, {}\n",
+            os.os_type(),
+            os.version(),
+            os.bitness()
+        ));
+
+        info.push_str("\n# Stats\n");
+        let stats = self.store.stats();
+        info.push_str(&format!(
+            "size_of_stale_entries: {}\n",
+            stats.size_of_stale_entries
+        ));
+        info.push_str(&format!(
+            "size_of_stale_entries_human: {}\n",
+            bytefmt::format(stats.size_of_stale_entries)
+        ));
+        info.push_str(&format!(
+            "total_stale_entries: {}\n",
+            stats.total_stale_entries
+        ));
+        info.push_str(&format!(
+            "total_active_entries: {}\n",
+            stats.total_active_entries
+        ));
+        info.push_str(&format!("total_data_files: {}\n", stats.total_data_files));
+        info.push_str(&format!(
+            "size_of_all_data_files: {}\n",
+            stats.size_of_all_data_files
+        ));
+        info.push_str(&format!(
+            "size_of_all_data_files_human: {}\n",
+            bytefmt::format(stats.size_of_all_data_files)
+        ));
+
+        Ok(Value::new_bulk_string(info.as_bytes().to_vec()))
+    }
+
+    fn handle_command(&mut self, args: &[&[u8]]) -> Result<Value> {
         if !args.is_empty() {
             return Err(TinkvError::resp_wrong_num_of_args("command"));
         }

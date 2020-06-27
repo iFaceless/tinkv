@@ -435,6 +435,11 @@ impl Store {
         self.len() == 0
     }
 
+    /// Return `true` if datastore contains the given key.
+    pub fn contains_key(&self, key: &[u8]) -> bool {
+        self.keydir.contains_key(key)
+    }
+
     /// Iterate all keys in datastore and call function `f`
     /// for each entry.
     ///
