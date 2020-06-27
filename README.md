@@ -294,12 +294,9 @@ I'm not familiar with erlang, but I found some implementations in other language
 
 Found another simple key-value database based on Bitcask model, please refer [xujiajun/nutsdb](https://github.com/xujiajun/nutsdb).
 
-## Blogs
+## Articles and more
 
 - [Implementing a Copyless Redis Protocol in Rust with Parsing Combinators](https://dpbriggs.ca/blog/Implementing-A-Copyless-Redis-Protocol-in-Rust-With-Parsing-Combinators)
-
-## Issues
-
 - [Expected type parameter, found struct](https://stackoverflow.com/questions/26049939/expected-type-parameter-found-struct)
 - [Help understanding how trait bounds workd](https://users.rust-lang.org/t/help-understanding-how-trait-bounds-work/19253/3)
 - [Idiomatic way to take ownership of all items in a Vec<String>?](https://users.rust-lang.org/t/idiomatic-way-to-take-ownership-of-all-items-in-a-vec-string/7811/12)
