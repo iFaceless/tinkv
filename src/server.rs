@@ -188,7 +188,7 @@ impl Server {
 
         let mut info = String::new();
         info.push_str("# Server\n");
-        info.push_str(&format!("# tinkv_version: {}\n", env!("CARGO_PKG_VERSION")));
+        info.push_str(&format!("tinkv_version: {}\n", env!("CARGO_PKG_VERSION")));
         let os = os_info::get();
         info.push_str(&format!(
             "os: {}, {}, {}\n",

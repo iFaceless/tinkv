@@ -8,7 +8,7 @@ path = 'examples/hello.rs'
 
 [package]
 name = 'tinkv'
-version = '0.9.1'
+version = '0.9.2'
 authors = ['0xE8551CCB <noti@ifaceless.space>']
 edition = '2018'
 description = 'A fast and simple key-value storage engine.'

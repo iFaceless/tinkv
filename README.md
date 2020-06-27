@@ -233,7 +233,7 @@ OK
 9) "command"
 127.0.0.1:7379> info
 # Server
-# tinkv_version: 0.9.0
+tinkv_version: 0.9.0
 os: Mac OS, 10.15.4, 64-bit
 
 # Stats
