@@ -181,7 +181,7 @@ $ tinkv /tmp/db -vvv compact
 - `dbsize`
 - `compact`: extended command to trigger a compaction manually.
 
-Key/value pairs are persisted in log files of directory `/urs/local/var/tinkv`. The default listening address of `tinkv-server` is `127.0.0.1:7379`, and you can connect to it with a redis client.
+Key/value pairs are persisted in log files under directory `/urs/local/var/tinkv`. The default listening address of server is `127.0.0.1:7379`, and you can connect to it with a redis client.
 
 ### Quick Start
 
@@ -199,31 +199,56 @@ $ tinkv-server -vv
 2020-06-24T13:46:49.343Z INFO  tinkv::store > build keydir from data file /usr/local/var/tinkv/000000000001.tinkv.data
 2020-06-24T13:46:49.343Z INFO  tinkv::store > build keydir from data file /usr/local/var/tinkv/000000000002.tinkv.data
 2020-06-24T13:46:49.343Z INFO  tinkv::store > build keydir done, got 0 keys. current stats: Stats { size_of_stale_entries: 0,total_stale_entries: 0, total_active_entries: 0, total_data_files: 2, size_of_all_data_files: 0 }
-2020-06-24T13:46:49.343Z INFO  tinkv::server > TinKV server is listening at '127.0.0.1:9815'
+2020-06-24T13:46:49.343Z INFO  tinkv::server > TinKV server is listening at '127.0.0.1:7379'
 ```
 
 Communicate with `tinkv-server` by using `reids-cli`:
 
+<details>
+    <summary>CLICK HERE</summary>
+
 ```shell
 $ redis-cli -p 7379
-127.0.0.1:9815> ping
+127.0.0.1:7379> ping
 PONG
-127.0.0.1:9815> ping "hello, tinkv"
+127.0.0.1:7379> ping "hello, tinkv"
 "hello, tinkv"
-127.0.0.1:9815> set user.name 0xE8551CCB
+127.0.0.1:7379> set name tinkv
 OK
-127.0.0.1:9815> get user.name
-"0xE8551CCB"
-127.0.0.1:9815> del user.name
-OK
-127.0.0.1:9815> get user.name
-(nil)
-127.0.0.1:9815> compact
-OK
-127.0.0.1:9815> not_found
-(error) ERR unsupported command 'NOT_FOUND'
-127.0.0.1:9815>
+127.0.0.1:7379> exists name
+(integer) 1
+127.0.0.1:7379> get name tinkv
+(error) ERR wrong number of arguments for 'get' command
+127.0.0.1:7379> get name
+"tinkv"
+127.0.0.1:7379> command
+1) "ping"
+2) "get"
+3) "set"
+4) "del"
+5) "dbsize"
+6) "exists"
+7) "compact"
+8) "info"
+9) "command"
+127.0.0.1:7379> info
+# Server
+# tinkv_version: 0.9.0
+os: Mac OS, 10.15.4, 64-bit
+
+# Stats
+size_of_stale_entries: 143
+size_of_stale_entries_human: 143 B
+total_stale_entries: 3
+total_active_entries: 1109
+total_data_files: 5
+size_of_all_data_files: 46813
+size_of_all_data_files_human: 46.81 KB
+127.0.0.1:7379> notfound
+(error) ERR unknown command `notfound`
+127.0.0.1:7379>
 ```
+</details>
 
 # About Compaction
 
