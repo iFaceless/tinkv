@@ -1,5 +1,5 @@
 [![Build Status](https://travis-ci.org/iFaceless/tinkv.svg?branch=master)](https://travis-ci.org/iFaceless/tinkv)
-[![tinkv](http://meritbadge.herokuapp.com/tinkv)](https://crates.io/crates/tinkv)
+[![tinkv](http://meritbadge.herokuapp.com/tinkv?ver=1)](https://crates.io/crates/tinkv)
 [![License: MIT OR Apache-2.0](https://img.shields.io/crates/l/tinkv.svg)](#license)
 
 # ![TinKV Logo](https://pic3.zhimg.com/80/v2-3a50e948ca1b35f311747591b1e854d1_1440w.png)
