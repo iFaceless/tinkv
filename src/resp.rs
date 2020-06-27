@@ -240,8 +240,9 @@ impl Value {
         let mut buf = vec![0u8; length as usize + 2]; // extra 2 bytes for `\r\n`
         reader.read_exact(&mut buf)?;
 
-        let err = Err(TinkvError::Protocol(
-            "protocol error, length of bulk string is not long enough".to_string(),
+        let err = Err(TinkvError::new_resp_common(
+            "INVALIDBULKSTR",
+            "protocol error, length of bulk string is not long enough",
         ));
 
         if buf.last().unwrap() == &LF {
@@ -338,8 +339,9 @@ where
                 let mut elements: Vec<Value> = Vec::new();
                 for _ in 0..len {
                     let v = self.next()?.ok_or_else(|| {
-                        TinkvError::Protocol(
-                            "protocol error, not enough array elements".to_string(),
+                        TinkvError::new_resp_common(
+                            "INVALIDARRAY",
+                            "protocol error, not enough array elements",
                         )
                     })?;
                     elements.push(v);
@@ -349,10 +351,10 @@ where
             }
             _ => {
                 // TODO: fallback to extract from plain text
-                Err(TinkvError::Protocol(format!(
-                    "invalid data type prefix: {}",
-                    repr!(remaining)
-                )))
+                Err(TinkvError::new_resp_common(
+                    "INVALIDTYPE",
+                    &format!("invalid data type prefix: {}", repr!(remaining)),
+                ))
             }
         }
     }
@@ -361,7 +363,10 @@ where
 fn parse_length(value: &[u8]) -> Result<i64> {
     let s = String::from_utf8_lossy(value).to_string();
     s.parse().map_err(|_| {
-        TinkvError::Protocol(format!("protocol error, cannot parse length from {}", s))
+        TinkvError::new_resp_common(
+            "INVALIDLENGTH",
+            &format!("protocol error, cannot parse length from {}", s),
+        )
     })
 }
 
@@ -437,41 +442,41 @@ where
     }
 
     pub fn serialize_simple_string(&mut self, value: &str) -> Result<()> {
-        self.writer.write_all(WRITE_SIMPLE_STR_PREFIX)?;
-        self.writer.write_all(value.as_bytes())?;
+        self.write(WRITE_SIMPLE_STR_PREFIX)?;
+        self.write(value.as_bytes())?;
         self.end()
     }
 
     pub fn serialize_error(&mut self, name: &str, msg: &str) -> Result<()> {
-        self.writer.write_all(WRITE_ERROR_PREFIX)?;
+        self.write(WRITE_ERROR_PREFIX)?;
         if name == "" {
-            self.writer.write_all(b"ERR")?;
+            self.write(b"ERR")?;
         } else {
-            self.writer.write_all(name.as_bytes())?;
+            self.write(name.as_bytes())?;
         }
-        self.writer.write_all(b" ")?;
-        self.writer.write_all(msg.as_bytes())?;
+        self.write(b" ")?;
+        self.write(msg.as_bytes())?;
         self.end()
     }
 
     pub fn serialize_integer(&mut self, value: i64) -> Result<()> {
-        self.writer.write_all(WRITE_INTEGER_PREFIX)?;
-        self.writer.write_all(value.to_string().as_bytes())?;
+        self.write(WRITE_INTEGER_PREFIX)?;
+        self.write(value.to_string().as_bytes())?;
         self.end()
     }
 
     pub fn serialize_bulk_string(&mut self, value: &[u8]) -> Result<()> {
-        self.writer.write_all(WRITE_BULK_STR_PREFIX)?;
-        self.writer.write_all(value.len().to_string().as_bytes())?;
-        self.writer.write_all(WRITE_CRLF_SUFFIX)?;
-        self.writer.write_all(value)?;
+        self.write(WRITE_BULK_STR_PREFIX)?;
+        self.write(value.len().to_string().as_bytes())?;
+        self.write(WRITE_CRLF_SUFFIX)?;
+        self.write(value)?;
         self.end()
     }
 
-    pub fn serialize_array(&mut self, value: &Vec<Value>) -> Result<()> {
-        self.writer.write_all(WRITE_ARRAY_PREFIX)?;
-        self.writer.write_all(value.len().to_string().as_bytes())?;
-        self.writer.write_all(WRITE_CRLF_SUFFIX)?;
+    pub fn serialize_array(&mut self, value: &[Value]) -> Result<()> {
+        self.write(WRITE_ARRAY_PREFIX)?;
+        self.write(value.len().to_string().as_bytes())?;
+        self.write(WRITE_CRLF_SUFFIX)?;
         for elem in value.iter() {
             self.serialize(elem)?;
         }
@@ -479,19 +484,25 @@ where
     }
 
     pub fn serialize_null_bulk_string(&mut self) -> Result<()> {
-        self.writer.write_all(WRITE_BULK_STR_PREFIX)?;
-        self.writer.write_all(b"-1")?;
+        self.write(WRITE_BULK_STR_PREFIX)?;
+        self.write(b"-1")?;
         self.end()
     }
 
     pub fn serialize_null_array(&mut self) -> Result<()> {
-        self.writer.write_all(WRITE_ARRAY_PREFIX)?;
-        self.writer.write_all(b"-1")?;
+        self.write(WRITE_ARRAY_PREFIX)?;
+        self.write(b"-1")?;
         self.end()
     }
 
     fn end(&mut self) -> Result<()> {
-        self.writer.write_all(WRITE_CRLF_SUFFIX)?;
+        self.write(WRITE_CRLF_SUFFIX)?;
+        Ok(())
+    }
+
+    fn write(&mut self, value: &[u8]) -> Result<()> {
+        trace!("serializer writes: `{}`", repr!(value));
+        self.writer.write_all(value)?;
         Ok(())
     }
 }

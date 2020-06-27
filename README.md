@@ -174,6 +174,9 @@ $ tinkv /tmp/db -vvv compact
 - `set <key> <value>`
 - `del <key>`
 - `ping [<message>]`
+- `exists <key>`
+- `info`
+- `command`
 - `keys <pattern>`
 - `dbsize`
 - `compact`: extended command to trigger a compaction manually.
@@ -271,9 +274,13 @@ Found another simple key-value database based on Bitcask model, please refer [xu
 - [Implementing a Copyless Redis Protocol in Rust with Parsing Combinators](https://dpbriggs.ca/blog/Implementing-A-Copyless-Redis-Protocol-in-Rust-With-Parsing-Combinators)
 
 ## Issues
+
 - [Expected type parameter, found struct](https://stackoverflow.com/questions/26049939/expected-type-parameter-found-struct)
 - [Help understanding how trait bounds workd](https://users.rust-lang.org/t/help-understanding-how-trait-bounds-work/19253/3)
 - [Idiomatic way to take ownership of all items in a Vec<String>?](https://users.rust-lang.org/t/idiomatic-way-to-take-ownership-of-all-items-in-a-vec-string/7811/12)
+- [Idiomatic callbacks in Rust](https://stackoverflow.com/questions/41081240/idiomatic-callbacks-in-rust)
+- [What are reasonable ways to store a callback in a struct?](https://users.rust-lang.org/t/what-are-reasonable-ways-to-store-a-callback-in-a-struct/5810)
+- [Things Rust doesn’t let you do](https://medium.com/@GolDDranks/things-rust-doesnt-let-you-do-draft-f596a3c740a5)
 
 # License
 

@@ -1,18 +1,23 @@
-//! TinKV server listens at specific address, and serves
-//! any request, returns an response to the client.
-//! Communicate with client using a redis-compatible protocol.
+//! TinKV server is a redis-compatible key value server.
 
 use crate::error::{Result, TinkvError};
 
 use crate::store::Store;
-use crate::util::ByteLineReader;
 
-use log::{debug, error, info, trace};
+use crate::resp::{deserialize_from_reader, serialize_to_writer, Value};
+use lazy_static::lazy_static;
+use log::{debug, info, trace};
+
+use std::convert::TryFrom;
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 
-#[derive(Debug)]
+lazy_static! {
+    static ref COMMANDS: Vec<&'static str> =
+        vec!["ping", "get", "set", "del", "dbsize", "exists", "compact", "info", "command",];
+}
+
 pub struct Server {
     store: Store,
 }
@@ -28,46 +33,21 @@ impl Server {
         info!("TinKV server is listening at '{}'", addr);
         let listener = TcpListener::bind(addr)?;
         for stream in listener.incoming() {
-            self.handle(stream?)?;
+            self.serve(stream?)?;
         }
         Ok(())
     }
 
-    fn handle(&mut self, stream: TcpStream) -> Result<()> {
+    fn serve(&mut self, stream: TcpStream) -> Result<()> {
         let peer_addr = stream.peer_addr()?;
         debug!("got connection from {}", &peer_addr);
-
         let reader = BufReader::new(&stream);
-        let mut writer = BufWriter::new(&stream);
+        let writer = BufWriter::new(&stream);
+        let mut conn = Conn::new(writer);
 
-        macro_rules! send_resp {
-            ($resp:expr) => {{
-                let resp = $resp;
-                let data = resp.serialize();
-                writer.write_all(data.as_bytes())?;
-                writer.flush()?;
-                debug!("Response sent to {}: {:?}", peer_addr, data);
-            };};
-        }
-
-        let de = Deserializer::new(reader);
-        for resp in de {
-            debug!("got resp {:?}", resp);
-            match resp {
-                Err(e) => {
-                    error!("got error when reading from {}: {}", &peer_addr, e);
-                }
-                Ok(r) => {
-                    if let Some(req) = Request::new(r) {
-                        send_resp!(self.process_request(req));
-                    } else {
-                        send_resp!(RespValue::Error {
-                            name: "ERR".to_owned(),
-                            msg: "unknown command".to_owned()
-                        });
-                    }
-                }
-            }
+        for value in deserialize_from_reader(reader) {
+            let req: Request = Request::try_from(value?)?;
+            self.handle_request(&mut conn, req)?;
         }
 
         debug!("connection disconnected from {}", &peer_addr);
@@ -75,289 +55,250 @@ impl Server {
         Ok(())
     }
 
-    fn process_request(&mut self, request: Request) -> RespValue {
-        trace!("process request: {:?}", &request);
-        match request.cmd.as_str() {
-            "PING" => match request.args.len() {
-                0 => RespValue::SimpleStr("PONG".to_owned()),
-                1 => RespValue::BulkStr(request.args.get(0).unwrap().to_owned()),
-                _ => RespValue::Error {
-                    name: "ERR".to_owned(),
-                    msg: "wrong number of arguments for 'ping' command".to_owned(),
-                },
-            },
-            "GET" => {
-                if request.args.len() != 1 {
-                    return RespValue::Error {
-                        name: "ERR".to_owned(),
-                        msg: "wrong number of arguments for 'get' command".to_owned(),
-                    };
-                }
-                match self.store.get(request.args.get(0).unwrap().as_bytes()) {
-                    Ok(v) => v
-                        .map(|x| RespValue::BulkStr(String::from_utf8_lossy(&x).to_string()))
-                        .unwrap_or_else(|| RespValue::NullBulkStr),
-                    Err(e) => RespValue::Error {
-                        name: "STOREERR".to_owned(),
-                        msg: format!("{}", e),
-                    },
-                }
-            }
-            "SET" => {
-                if request.args.len() < 2 {
-                    return RespValue::Error {
-                        name: "ERR".to_owned(),
-                        msg: "wrong number of arguments for 'set' command".to_owned(),
-                    };
-                }
-                match self.store.set(
-                    request.args.get(0).unwrap().as_bytes(),
-                    request.args.get(1).unwrap().as_bytes(),
-                ) {
-                    Ok(_) => RespValue::SimpleStr("OK".to_owned()),
-                    Err(e) => RespValue::Error {
-                        name: "STOREERR".to_owned(),
-                        msg: format!("{}", e),
-                    },
-                }
-            }
-            "DEL" => {
-                if request.args.len() != 1 {
-                    return RespValue::Error {
-                        name: "ERR".to_owned(),
-                        msg: "wrong number of arguments for 'del' command".to_owned(),
-                    };
-                }
-                match self.store.remove(request.args.get(0).unwrap().as_bytes()) {
-                    Ok(_) => RespValue::SimpleStr("OK".to_owned()),
-                    Err(e) => RespValue::Error {
-                        name: "STOREERR".to_owned(),
-                        msg: format!("{}", e),
-                    },
-                }
-            }
-            "COMPACT" => {
-                if !request.args.is_empty() {
-                    return RespValue::Error {
-                        name: "ERR".to_owned(),
-                        msg: "wrong number of arguments for 'compact' command".to_owned(),
-                    };
-                }
-                match self.store.compact() {
-                    Ok(_) => RespValue::SimpleStr("OK".to_owned()),
-                    Err(e) => RespValue::Error {
-                        name: "STOREERR".to_owned(),
-                        msg: format!("{}", e),
-                    },
-                }
-            }
-            "KEYS" => {
-                if request.args.len() != 1 {
-                    return RespValue::Error {
-                        name: "ERR".to_owned(),
-                        msg: "wrong number of arguments for 'keys' command".to_owned(),
-                    };
-                }
+    fn handle_request<W: Write>(&mut self, conn: &mut Conn<W>, req: Request) -> Result<()> {
+        trace!("got request: `{}`, args: `{:?}`", &req.name, &req.args);
+        let args = req.args_as_slice();
 
-                let pattern: &String = request.args.get(0).unwrap();
-                let mut resp: Vec<RespValue> = Vec::new();
-                if pattern.ends_with('*') {
-                    let prefix = pattern.trim_end_matches('*').as_bytes();
-                    for k in self.store.keys() {
-                        if prefix.is_empty() || k.starts_with(prefix) {
-                            // collect keys
-                            resp.push(RespValue::BulkStr(String::from_utf8_lossy(k).into()));
-                        }
+        macro_rules! send {
+            () => {
+                conn.write_value(Value::new_null_bulk_string())?
+            };
+            ($value:expr) => {
+                match $value {
+                    Err(TinkvError::RespCommon { name, msg }) => {
+                        let err = Value::new_error(&name, &msg);
+                        conn.write_value(err)?;
                     }
+                    Err(TinkvError::RespWrongNumOfArgs(_)) => {
+                        let msg = format!("{}", $value.unwrap_err());
+                        let err = Value::new_error("ERR", &msg);
+                        conn.write_value(err)?;
+                    }
+                    Err(e) => return Err(e),
+                    Ok(v) => conn.write_value(v)?,
                 }
-                if resp.is_empty() {
-                    return RespValue::NullArray;
-                }
-
-                RespValue::Array(resp)
-            }
-            "DBSIZE" => {
-                if !request.args.is_empty() {
-                    return RespValue::Error {
-                        name: "ERR".to_owned(),
-                        msg: "wrong number of arguments for 'dbsize' command".to_owned(),
-                    };
-                }
-                RespValue::Integer(self.store.len() as i64)
-            }
-            "COMMAND" => RespValue::NullArray,
-            _ => RespValue::Error {
-                name: "ERR".to_owned(),
-                msg: format!(
-                    "unknown command `{}`, with args begining with {}",
-                    request.cmd,
-                    request
-                        .args
-                        .iter()
-                        .map(|x| format!("`{}`", x))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            },
+            };
         }
+
+        match req.name.as_ref() {
+            "ping" => send!(self.handle_ping(&args)),
+            "get" => send!(self.handle_get(&args)),
+            "set" => send!(self.handle_set(&args)),
+            "del" => send!(self.handle_del(&args)),
+            "dbsize" => send!(self.handle_dbsize(&args)),
+            "exists" => send!(self.handle_exists(&args)),
+            "compact" => send!(self.handle_compact(&args)),
+            "info" => send!(self.handle_info(&args)),
+            "command" => send!(self.handle_command(&args)),
+            _ => {
+                conn.write_value(Value::new_error(
+                    "ERR",
+                    &format!("unknown command `{}`", &req.name),
+                ))?;
+            }
+        }
+
+        conn.flush()?;
+
+        Ok(())
+    }
+
+    fn handle_ping(&mut self, args: &[&[u8]]) -> Result<Value> {
+        match args.len() {
+            0 => Ok(Value::new_simple_string("PONG")),
+            1 => Ok(Value::new_bulk_string(args[0].to_vec())),
+            _ => Err(TinkvError::resp_wrong_num_of_args("ping")),
+        }
+    }
+
+    fn handle_get(&mut self, args: &[&[u8]]) -> Result<Value> {
+        if args.len() != 1 {
+            return Err(TinkvError::resp_wrong_num_of_args("get"));
+        }
+
+        Ok(self
+            .store
+            .get(args[0])?
+            .map(Value::new_bulk_string)
+            .unwrap_or_else(Value::new_null_bulk_string))
+    }
+
+    fn handle_set(&mut self, args: &[&[u8]]) -> Result<Value> {
+        if args.len() < 2 {
+            return Err(TinkvError::resp_wrong_num_of_args("set"));
+        }
+
+        match self.store.set(args[0], args[1]) {
+            Ok(()) => Ok(Value::new_simple_string("OK")),
+            Err(e) => Err(TinkvError::new_resp_common(
+                "INTERNALERR",
+                &format!("{}", e),
+            )),
+        }
+    }
+
+    fn handle_del(&mut self, args: &[&[u8]]) -> Result<Value> {
+        if args.len() != 1 {
+            return Err(TinkvError::resp_wrong_num_of_args("del"));
+        }
+
+        match self.store.remove(args[0]) {
+            Ok(()) => Ok(Value::new_simple_string("OK")),
+            Err(e) => Err(TinkvError::new_resp_common(
+                "INTERNALERR",
+                &format!("{}", e),
+            )),
+        }
+    }
+
+    fn handle_dbsize(&mut self, args: &[&[u8]]) -> Result<Value> {
+        if !args.is_empty() {
+            return Err(TinkvError::resp_wrong_num_of_args("dbsize"));
+        }
+
+        Ok(Value::new_integer(self.store.len() as i64))
+    }
+
+    fn handle_exists(&mut self, args: &[&[u8]]) -> Result<Value> {
+        if args.len() != 1 {
+            return Err(TinkvError::resp_wrong_num_of_args("exists"));
+        }
+
+        Ok(Value::new_integer(self.store.contains_key(args[0]) as i64))
+    }
+
+    fn handle_compact(&mut self, args: &[&[u8]]) -> Result<Value> {
+        if !args.is_empty() {
+            return Err(TinkvError::resp_wrong_num_of_args("compact"));
+        }
+
+        match self.store.compact() {
+            Ok(_) => Ok(Value::new_simple_string("OK")),
+            Err(e) => Err(TinkvError::new_resp_common(
+                "INTERNALERR",
+                &format!("{}", e),
+            )),
+        }
+    }
+
+    fn handle_info(&mut self, args: &[&[u8]]) -> Result<Value> {
+        if !args.is_empty() {
+            return Err(TinkvError::resp_wrong_num_of_args("info"));
+        }
+
+        let mut info = String::new();
+        info.push_str("# Server\n");
+        info.push_str(&format!("# tinkv_version: {}\n", env!("CARGO_PKG_VERSION")));
+        let os = os_info::get();
+        info.push_str(&format!(
+            "os: {}, {}, {}\n",
+            os.os_type(),
+            os.version(),
+            os.bitness()
+        ));
+
+        info.push_str("\n# Stats\n");
+        let stats = self.store.stats();
+        info.push_str(&format!(
+            "size_of_stale_entries: {}\n",
+            stats.size_of_stale_entries
+        ));
+        info.push_str(&format!(
+            "size_of_stale_entries_human: {}\n",
+            bytefmt::format(stats.size_of_stale_entries)
+        ));
+        info.push_str(&format!(
+            "total_stale_entries: {}\n",
+            stats.total_stale_entries
+        ));
+        info.push_str(&format!(
+            "total_active_entries: {}\n",
+            stats.total_active_entries
+        ));
+        info.push_str(&format!("total_data_files: {}\n", stats.total_data_files));
+        info.push_str(&format!(
+            "size_of_all_data_files: {}\n",
+            stats.size_of_all_data_files
+        ));
+        info.push_str(&format!(
+            "size_of_all_data_files_human: {}\n",
+            bytefmt::format(stats.size_of_all_data_files)
+        ));
+
+        Ok(Value::new_bulk_string(info.as_bytes().to_vec()))
+    }
+
+    fn handle_command(&mut self, args: &[&[u8]]) -> Result<Value> {
+        if !args.is_empty() {
+            return Err(TinkvError::resp_wrong_num_of_args("command"));
+        }
+
+        let mut values = vec![];
+        for cmd in COMMANDS.iter() {
+            values.push(Value::new_bulk_string(cmd.as_bytes().to_vec()));
+        }
+
+        Ok(Value::new_array(values))
     }
 }
 
 #[derive(Debug)]
 struct Request {
-    cmd: String,
-    args: Vec<String>,
+    name: String,
+    args: Vec<Value>,
 }
-
 impl Request {
-    fn new(rv: RespValue) -> Option<Request> {
-        match rv {
-            RespValue::Array(items) => {
-                let mut req = Request {
-                    cmd: "unknown".to_owned(),
-                    args: vec![],
-                };
-                for item in items {
-                    let s = match item {
-                        RespValue::SimpleStr(s) => s,
-                        RespValue::BulkStr(s) => s,
-                        _ => continue,
-                    };
-                    if req.cmd == "unknown" {
-                        req.cmd = s.to_uppercase();
-                    } else {
-                        req.args.push(s);
-                    }
+    fn args_as_slice(&self) -> Vec<&[u8]> {
+        let mut res = vec![];
+        for arg in self.args.iter() {
+            if let Some(v) = arg.as_bulk_string() {
+                res.push(v);
+            }
+        }
+        res
+    }
+}
+
+impl TryFrom<Value> for Request {
+    type Error = TinkvError;
+
+    fn try_from(value: Value) -> std::result::Result<Self, Self::Error> {
+        match value {
+            Value::Array(mut v) => {
+                if v.is_empty() {
+                    return Err(TinkvError::ParseRespValue);
                 }
-                Some(req)
-            }
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug)]
-enum RespValue {
-    SimpleStr(String),
-    BulkStr(String),
-    Error { name: String, msg: String },
-    Integer(i64),
-    Array(Vec<RespValue>),
-    NullBulkStr,
-    NullArray,
-}
-
-impl RespValue {
-    fn serialize(&self) -> String {
-        match self {
-            RespValue::SimpleStr(s) => format!("+{}\r\n", s),
-            RespValue::Error { name, msg } => format!("-{} {}\r\n", name, msg),
-            RespValue::Integer(i) => format!(":{}\r\n", i),
-            RespValue::BulkStr(s) => {
-                assert!(
-                    !s.is_empty(),
-                    "non-empty bulk string need at least one char"
-                );
-                format!("${}\r\n{}\r\n", s.len(), s)
-            }
-            RespValue::Array(members) => {
-                assert!(
-                    !members.is_empty(),
-                    "non-empty array need at least one element"
-                );
-                let mut s: Vec<String> = Vec::new();
-                for m in members {
-                    s.push(m.serialize());
-                }
-                format!("*{}\r\n{}", members.len(), s.join(""))
-            }
-            RespValue::NullBulkStr => "$-1\r\n".to_owned(),
-            RespValue::NullArray => "*-1\r\n".to_owned(),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct Deserializer<B: BufRead> {
-    reader: ByteLineReader<B>,
-}
-
-impl<B: BufRead> Deserializer<B> {
-    fn new(reader: B) -> Deserializer<B> {
-        Self {
-            reader: ByteLineReader::new(reader),
-        }
-    }
-
-    fn deserialize(&mut self, bytes: &[u8]) -> Result<RespValue> {
-        trace!("got bytes from reader: {}", String::from_utf8_lossy(bytes));
-        match bytes[0] {
-            b'+' => {
-                // parse simple string
-                let s = String::from_utf8_lossy(&bytes[1..]);
-                Ok(RespValue::SimpleStr(s.into()))
-            }
-            b'-' => {
-                // error string
-                let s = String::from_utf8_lossy(&bytes[1..]).to_string();
-                let err_name_end_index = s.find(char::is_whitespace).unwrap();
-                Ok(RespValue::Error {
-                    name: s[..err_name_end_index].to_owned(),
-                    msg: s[err_name_end_index + 1..].to_owned(),
+                let name =
+                    String::from_utf8_lossy(v.remove(0).as_bulk_string().unwrap()).to_string();
+                Ok(Self {
+                    name: name.to_ascii_lowercase(),
+                    args: v,
                 })
             }
-            b':' => {
-                // integer
-                let s = String::from_utf8_lossy(&bytes[1..]).to_string();
-                let v = s.parse::<i64>()?;
-                Ok(RespValue::Integer(v))
-            }
-            b'$' => {
-                // bulk string
-                let len: isize = String::from_utf8_lossy(&bytes[1..]).to_string().parse()?;
-                if len == -1 {
-                    return Ok(RespValue::NullBulkStr);
-                }
-
-                let mut buf = vec![0u8; len as usize + 2];
-                self.reader.read_exact(&mut buf)?;
-                Ok(RespValue::BulkStr(
-                    String::from_utf8_lossy(&buf).trim().to_owned(),
-                ))
-            }
-            b'*' => {
-                // array
-                trace!("array: {:?}", bytes);
-                let len: isize = String::from_utf8_lossy(&bytes[1..]).to_string().parse()?;
-                if len == -1 {
-                    return Ok(RespValue::NullArray);
-                }
-
-                let mut members: Vec<RespValue> = vec![];
-                for _ in 0..len {
-                    members.push(self.next().unwrap()?);
-                }
-                Ok(RespValue::Array(members))
-            }
-            _ => Err(TinkvError::Custom(
-                "protocol error, parse failed".to_owned(),
-            )),
+            _ => Err(TinkvError::ParseRespValue),
         }
     }
 }
 
-impl<B: BufRead> Iterator for Deserializer<B> {
-    type Item = Result<RespValue>;
+struct Conn<W> {
+    writer: W,
+}
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let reader = &mut self.reader;
-        let bytes = match reader.next_line() {
-            None => return None,
-            Some(Err(e)) => return Some(Err(e.into())),
-            // TODO: avoid data copying.
-            Some(Ok(chunk)) => chunk.to_vec(),
-        };
+impl<W> Conn<W>
+where
+    W: Write,
+{
+    fn new(writer: W) -> Self {
+        Self { writer }
+    }
 
-        Some(self.deserialize(&bytes))
+    fn write_value(&mut self, value: Value) -> Result<()> {
+        trace!("send value to client: {:?}", value);
+        serialize_to_writer(&mut self.writer, &value)?;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.writer.flush()
     }
 }
