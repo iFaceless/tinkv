@@ -11,6 +11,8 @@ pub type Result<T> = ::std::result::Result<T, TinkvError>;
 pub enum TinkvError {
     #[error(transparent)]
     ParseInt(#[from] ParseIntError),
+    #[error("parse resp value failed")]
+    ParseRespValue,
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]
@@ -38,6 +40,21 @@ pub enum TinkvError {
     Custom(String),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
-    #[error("{}", .0)]
-    Protocol(String),
+    #[error("{} {}", .name, .msg)]
+    RespCommon { name: String, msg: String },
+    #[error("wrong number of arguments for '{}' command", .0)]
+    RespWrongNumOfArgs(String),
+}
+
+impl TinkvError {
+    pub fn new_resp_common(name: &str, msg: &str) -> Self {
+        Self::RespCommon {
+            name: name.to_owned(),
+            msg: msg.to_owned(),
+        }
+    }
+
+    pub fn resp_wrong_num_of_args(name: &str) -> Self {
+        Self::RespWrongNumOfArgs(name.to_owned())
+    }
 }
