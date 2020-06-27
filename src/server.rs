@@ -16,17 +16,18 @@ use std::io::{BufReader, BufWriter};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 
 lazy_static! {
-    static ref COMMANDS: Vec<&'static str> = vec!["ping", "get", "set", "del", "command",];
+    static ref COMMANDS: Vec<&'static str> =
+        vec!["ping", "get", "set", "del", "dbsize", "compact", "command",];
 }
 
 pub struct Server {
-    _store: Store,
+    store: Store,
 }
 
 impl Server {
     #[allow(dead_code)]
     pub fn new(store: Store) -> Self {
-        Server { _store: store }
+        Server { store }
     }
 
     pub fn run<A: ToSocketAddrs>(&mut self, addr: A) -> Result<()> {
@@ -61,6 +62,9 @@ impl Server {
         let args = req.args_as_slice();
 
         macro_rules! send {
+            () => {
+                conn.write_value(Value::new_null_bulk_string())?
+            };
             ($value:expr) => {
                 match $value {
                     Err(TinkvError::RespCommon { name, msg }) => {
@@ -80,7 +84,11 @@ impl Server {
 
         match req.name.as_ref() {
             "ping" => send!(self.handle_ping(&args)),
-            "command" => send!(self.handle_command()),
+            "get" => send!(self.handle_get(&args)),
+            "set" => send!(self.handle_set(&args)),
+            "del" => send!(self.handle_del(&args)),
+            "dbsize" => send!(self.handle_dbsize(&args)),
+            "command" => send!(self.handle_command(&args)),
             _ => {
                 conn.write_value(Value::new_error(
                     "ERR",
@@ -102,7 +110,63 @@ impl Server {
         }
     }
 
-    fn handle_command(&mut self) -> Result<Value> {
+    fn handle_get(&mut self, args: &Vec<&[u8]>) -> Result<Value> {
+        if args.len() != 1 {
+            return Err(TinkvError::resp_wrong_num_of_args("get"));
+        }
+
+        Ok(self
+            .store
+            .get(args[0])?
+            .and_then(|x| Some(Value::new_bulk_string(x)))
+            .unwrap_or(Value::new_null_bulk_string()))
+    }
+
+    fn handle_set(&mut self, args: &Vec<&[u8]>) -> Result<Value> {
+        if args.len() < 2 {
+            return Err(TinkvError::resp_wrong_num_of_args("set"));
+        }
+
+        match self.store.set(args[0], args[1]) {
+            Ok(()) => return Ok(Value::new_simple_string("OK")),
+            Err(e) => {
+                return Err(TinkvError::new_resp_common(
+                    "INTERNALERR",
+                    &format!("{}", e),
+                ))
+            }
+        }
+    }
+
+    fn handle_del(&mut self, args: &Vec<&[u8]>) -> Result<Value> {
+        if args.len() != 1 {
+            return Err(TinkvError::resp_wrong_num_of_args("del"));
+        }
+
+        match self.store.remove(args[0]) {
+            Ok(()) => return Ok(Value::new_simple_string("OK")),
+            Err(e) => {
+                return Err(TinkvError::new_resp_common(
+                    "INTERNALERR",
+                    &format!("{}", e),
+                ))
+            }
+        }
+    }
+
+    fn handle_dbsize(&mut self, args: &Vec<&[u8]>) -> Result<Value> {
+        if !args.is_empty() {
+            return Err(TinkvError::resp_wrong_num_of_args("dbsize"));
+        }
+
+        Ok(Value::new_integer(self.store.len() as i64))
+    }
+
+    fn handle_command(&mut self, args: &Vec<&[u8]>) -> Result<Value> {
+        if !args.is_empty() {
+            return Err(TinkvError::resp_wrong_num_of_args("command"));
+        }
+
         let mut values = vec![];
         for cmd in COMMANDS.iter() {
             values.push(Value::new_bulk_string(cmd.as_bytes().to_vec()));
