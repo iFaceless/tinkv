@@ -416,7 +416,7 @@ impl Store {
     }
 
     /// Return current stats of datastore.
-    pub fn stats(&mut self) -> &Stats {
+    pub fn stats(&self) -> &Stats {
         &self.stats
     }
 

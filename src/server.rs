@@ -182,50 +182,76 @@ impl Server {
     }
 
     fn handle_info(&mut self, args: &[&[u8]]) -> Result<Value> {
-        if !args.is_empty() {
-            return Err(TinkvError::resp_wrong_num_of_args("info"));
+        let server_section = || {
+            let mut info = String::new();
+            info.push_str("# Server\n");
+            info.push_str(&format!("tinkv_version: {}\n", env!("CARGO_PKG_VERSION")));
+
+            let os = os_info::get();
+            info.push_str(&format!(
+                "os: {}, {}, {}\n",
+                os.os_type(),
+                os.version(),
+                os.bitness()
+            ));
+            info
+        };
+
+        let stats_section = || {
+            let mut info = String::new();
+            info.push_str("# Stats\n");
+            let stats = self.store.stats();
+            info.push_str(&format!(
+                "size_of_stale_entries: {}\n",
+                stats.size_of_stale_entries
+            ));
+            info.push_str(&format!(
+                "size_of_stale_entries_human: {}\n",
+                bytefmt::format(stats.size_of_stale_entries)
+            ));
+            info.push_str(&format!(
+                "total_stale_entries: {}\n",
+                stats.total_stale_entries
+            ));
+            info.push_str(&format!(
+                "total_active_entries: {}\n",
+                stats.total_active_entries
+            ));
+            info.push_str(&format!("total_data_files: {}\n", stats.total_data_files));
+            info.push_str(&format!(
+                "size_of_all_data_files: {}\n",
+                stats.size_of_all_data_files
+            ));
+            info.push_str(&format!(
+                "size_of_all_data_files_human: {}\n",
+                bytefmt::format(stats.size_of_all_data_files)
+            ));
+            info
+        };
+
+        let mut info = Vec::new();
+
+        match args.len() {
+            0 => {
+                info.push(server_section());
+                info.push(stats_section());
+            }
+            1 => match String::from_utf8_lossy(args[0])
+                .to_ascii_lowercase()
+                .as_ref()
+            {
+                "server" => {
+                    info.push(server_section());
+                }
+                "stats" => {
+                    info.push(stats_section());
+                }
+                _ => {}
+            },
+            _ => return Err(TinkvError::resp_wrong_num_of_args("info")),
         }
 
-        let mut info = String::new();
-        info.push_str("# Server\n");
-        info.push_str(&format!("tinkv_version: {}\n", env!("CARGO_PKG_VERSION")));
-        let os = os_info::get();
-        info.push_str(&format!(
-            "os: {}, {}, {}\n",
-            os.os_type(),
-            os.version(),
-            os.bitness()
-        ));
-
-        info.push_str("\n# Stats\n");
-        let stats = self.store.stats();
-        info.push_str(&format!(
-            "size_of_stale_entries: {}\n",
-            stats.size_of_stale_entries
-        ));
-        info.push_str(&format!(
-            "size_of_stale_entries_human: {}\n",
-            bytefmt::format(stats.size_of_stale_entries)
-        ));
-        info.push_str(&format!(
-            "total_stale_entries: {}\n",
-            stats.total_stale_entries
-        ));
-        info.push_str(&format!(
-            "total_active_entries: {}\n",
-            stats.total_active_entries
-        ));
-        info.push_str(&format!("total_data_files: {}\n", stats.total_data_files));
-        info.push_str(&format!(
-            "size_of_all_data_files: {}\n",
-            stats.size_of_all_data_files
-        ));
-        info.push_str(&format!(
-            "size_of_all_data_files_human: {}\n",
-            bytefmt::format(stats.size_of_all_data_files)
-        ));
-
-        Ok(Value::new_bulk_string(info.as_bytes().to_vec()))
+        Ok(Value::new_bulk_string(info.join("\n").as_bytes().to_vec()))
     }
 
     fn handle_command(&mut self, args: &[&[u8]]) -> Result<Value> {
