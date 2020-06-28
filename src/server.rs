@@ -14,8 +14,10 @@ use std::io::{BufReader, BufWriter};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 
 lazy_static! {
-    static ref COMMANDS: Vec<&'static str> =
-        vec!["ping", "get", "set", "del", "dbsize", "exists", "compact", "info", "command",];
+    static ref COMMANDS: Vec<&'static str> = vec![
+        "ping", "get", "mget", "set", "mset", "del", "dbsize", "exists", "compact", "info",
+        "command",
+    ];
 }
 
 pub struct Server {
@@ -46,8 +48,7 @@ impl Server {
         let mut conn = Conn::new(writer);
 
         for value in deserialize_from_reader(reader) {
-            let req: Request = Request::try_from(value?)?;
-            self.handle_request(&mut conn, req)?;
+            self.handle_request(&mut conn, Request::try_from(value?)?)?;
         }
 
         debug!("connection disconnected from {}", &peer_addr);
@@ -83,7 +84,9 @@ impl Server {
         match req.name.as_ref() {
             "ping" => send!(self.handle_ping(&args)),
             "get" => send!(self.handle_get(&args)),
+            "mget" => send!(self.handle_mget(&args)),
             "set" => send!(self.handle_set(&args)),
+            "mset" => send!(self.handle_mset(&args)),
             "del" => send!(self.handle_del(&args)),
             "dbsize" => send!(self.handle_dbsize(&args)),
             "exists" => send!(self.handle_exists(&args)),
@@ -123,6 +126,24 @@ impl Server {
             .unwrap_or_else(Value::new_null_bulk_string))
     }
 
+    fn handle_mget(&mut self, args: &[&[u8]]) -> Result<Value> {
+        if args.is_empty() {
+            return Err(TinkvError::resp_wrong_num_of_args("mget"));
+        }
+
+        let mut values = vec![];
+        for arg in args {
+            let value = self
+                .store
+                .get(arg)?
+                .map(Value::new_bulk_string)
+                .unwrap_or_else(Value::new_null_bulk_string);
+            values.push(value);
+        }
+
+        Ok(Value::new_array(values))
+    }
+
     fn handle_set(&mut self, args: &[&[u8]]) -> Result<Value> {
         if args.len() < 2 {
             return Err(TinkvError::resp_wrong_num_of_args("set"));
@@ -135,6 +156,30 @@ impl Server {
                 &format!("{}", e),
             )),
         }
+    }
+
+    fn handle_mset(&mut self, args: &[&[u8]]) -> Result<Value> {
+        if args.len() % 2 != 0 {
+            return Err(TinkvError::resp_wrong_num_of_args("mset"));
+        }
+
+        let mut i = 0;
+        loop {
+            if i + 1 >= args.len() {
+                break;
+            }
+
+            if let Err(e) = self.store.set(args[i], args[i + 1]) {
+                return Err(TinkvError::new_resp_common(
+                    "INTERNALERR",
+                    &format!("{}", e),
+                ));
+            }
+
+            i += 2;
+        }
+
+        Ok(Value::new_simple_string("OK"))
     }
 
     fn handle_del(&mut self, args: &[&[u8]]) -> Result<Value> {
@@ -160,11 +205,18 @@ impl Server {
     }
 
     fn handle_exists(&mut self, args: &[&[u8]]) -> Result<Value> {
-        if args.len() != 1 {
+        if args.is_empty() {
             return Err(TinkvError::resp_wrong_num_of_args("exists"));
         }
 
-        Ok(Value::new_integer(self.store.contains_key(args[0]) as i64))
+        let mut exists = 0;
+        for arg in args {
+            if self.store.contains_key(arg) {
+                exists += 1;
+            }
+        }
+
+        Ok(Value::new_integer(exists as i64))
     }
 
     fn handle_compact(&mut self, args: &[&[u8]]) -> Result<Value> {
