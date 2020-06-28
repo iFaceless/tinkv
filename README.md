@@ -33,7 +33,6 @@ $ cargo add tinkv
 Full example usage can be found in [examples/basic.rs](./examples/basic.rs).
 
 ```rust
-use pretty_env_logger;
 use tinkv::{self, Store};
 
 fn main() -> tinkv::Result<()> {
@@ -56,7 +55,6 @@ fn main() -> tinkv::Result<()> {
 ### Open with custom options
 
 ```rust
-use pretty_env_logger;
 use tinkv::{self, Store};
 
 fn main() -> tinkv::Result<()> {
@@ -171,13 +169,15 @@ $ tinkv /tmp/db -vvv compact
 [`tinkv-server`](./bin/../src/bin/tinkv-server.rs) is a redis-compatible key/value store server. However, not all the redis commmands are supported. The available commands are:
 
 - `get <key>`
+- `mget <key> [<key>...]`
 - `set <key> <value>`
+- `mset <key> <value> [<key> <value>]`
 - `del <key>`
+- `keys <pattern>`
 - `ping [<message>]`
 - `exists <key>`
-- `info`
+- `info [<section>]`
 - `command`
-- `keys <pattern>`
 - `dbsize`
 - `compact`: extended command to trigger a compaction manually.
 
@@ -185,7 +185,7 @@ Key/value pairs are persisted in log files under directory `/urs/local/var/tinkv
 
 ### Quick Start
 
-Install `tinkv-server` is very simple:
+It's very easy to install `tinkv-server`:
 
 ```shell
 $ cargo install tinkv
@@ -231,6 +231,7 @@ OK
 7) "compact"
 8) "info"
 9) "command"
+...and more
 127.0.0.1:7379> info
 # Server
 tinkv_version: 0.9.0
@@ -262,7 +263,6 @@ Hint files (for fast startup) of corresponding data files will be generated afte
 You can call `store.compact()` method to trigger compaction process if nessesary.
 
 ```rust
-use pretty_env_logger;
 use tinkv::{self, Store};
 
 fn main() -> tinkv::Result<()> {

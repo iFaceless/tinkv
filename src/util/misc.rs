@@ -22,6 +22,10 @@ pub fn parse_file_id(path: &Path) -> Option<u64> {
         .ok()
 }
 
+pub fn to_utf8_string(value: &[u8]) -> String {
+    String::from_utf8_lossy(value).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -36,5 +40,10 @@ mod tests {
 
         let r = parse_file_id(Path::new("path/to"));
         assert_eq!(r, None);
+    }
+
+    #[test]
+    fn test_to_utf8_str() {
+        assert_eq!(to_utf8_string(b"hello, world"), "hello, world".to_owned());
     }
 }
