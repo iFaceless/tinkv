@@ -10,6 +10,7 @@ use log::{debug, info, trace};
 
 use crate::util::to_utf8_string;
 use std::convert::TryFrom;
+use std::fmt;
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
@@ -58,8 +59,8 @@ impl Server {
     }
 
     fn handle_request<W: Write>(&mut self, conn: &mut Conn<W>, req: Request) -> Result<()> {
-        trace!("got request: `{}`, args: `{:?}`", &req.name, &req.args);
-        let args = req.args_as_slice();
+        trace!("handle {}", &req);
+        let argv = req.argv();
 
         macro_rules! send {
             () => {
@@ -83,18 +84,18 @@ impl Server {
         }
 
         match req.name.as_ref() {
-            "ping" => send!(self.handle_ping(&args)),
-            "get" => send!(self.handle_get(&args)),
-            "mget" => send!(self.handle_mget(&args)),
-            "set" => send!(self.handle_set(&args)),
-            "mset" => send!(self.handle_mset(&args)),
-            "del" => send!(self.handle_del(&args)),
-            "dbsize" => send!(self.handle_dbsize(&args)),
-            "exists" => send!(self.handle_exists(&args)),
-            "keys" => send!(self.handle_keys(&args)),
-            "compact" => send!(self.handle_compact(&args)),
-            "info" => send!(self.handle_info(&args)),
-            "command" => send!(self.handle_command(&args)),
+            "ping" => send!(self.handle_ping(&argv)),
+            "get" => send!(self.handle_get(&argv)),
+            "mget" => send!(self.handle_mget(&argv)),
+            "set" => send!(self.handle_set(&argv)),
+            "mset" => send!(self.handle_mset(&argv)),
+            "del" => send!(self.handle_del(&argv)),
+            "dbsize" => send!(self.handle_dbsize(&argv)),
+            "exists" => send!(self.handle_exists(&argv)),
+            "keys" => send!(self.handle_keys(&argv)),
+            "compact" => send!(self.handle_compact(&argv)),
+            "info" => send!(self.handle_info(&argv)),
+            "command" => send!(self.handle_command(&argv)),
             _ => {
                 conn.write_value(Value::new_error(
                     "ERR",
@@ -108,33 +109,33 @@ impl Server {
         Ok(())
     }
 
-    fn handle_ping(&mut self, args: &[&[u8]]) -> Result<Value> {
-        match args.len() {
+    fn handle_ping(&mut self, argv: &[&[u8]]) -> Result<Value> {
+        match argv.len() {
             0 => Ok(Value::new_simple_string("PONG")),
-            1 => Ok(Value::new_bulk_string(args[0].to_vec())),
+            1 => Ok(Value::new_bulk_string(argv[0].to_vec())),
             _ => Err(TinkvError::resp_wrong_num_of_args("ping")),
         }
     }
 
-    fn handle_get(&mut self, args: &[&[u8]]) -> Result<Value> {
-        if args.len() != 1 {
+    fn handle_get(&mut self, argv: &[&[u8]]) -> Result<Value> {
+        if argv.len() != 1 {
             return Err(TinkvError::resp_wrong_num_of_args("get"));
         }
 
         Ok(self
             .store
-            .get(args[0])?
+            .get(argv[0])?
             .map(Value::new_bulk_string)
             .unwrap_or_else(Value::new_null_bulk_string))
     }
 
-    fn handle_mget(&mut self, args: &[&[u8]]) -> Result<Value> {
-        if args.is_empty() {
+    fn handle_mget(&mut self, argv: &[&[u8]]) -> Result<Value> {
+        if argv.is_empty() {
             return Err(TinkvError::resp_wrong_num_of_args("mget"));
         }
 
         let mut values = vec![];
-        for arg in args {
+        for arg in argv {
             let value = self
                 .store
                 .get(arg)?
@@ -146,12 +147,12 @@ impl Server {
         Ok(Value::new_array(values))
     }
 
-    fn handle_set(&mut self, args: &[&[u8]]) -> Result<Value> {
-        if args.len() < 2 {
+    fn handle_set(&mut self, argv: &[&[u8]]) -> Result<Value> {
+        if argv.len() < 2 {
             return Err(TinkvError::resp_wrong_num_of_args("set"));
         }
 
-        match self.store.set(args[0], args[1]) {
+        match self.store.set(argv[0], argv[1]) {
             Ok(()) => Ok(Value::new_simple_string("OK")),
             Err(e) => Err(TinkvError::new_resp_common(
                 "INTERNALERR",
@@ -160,18 +161,18 @@ impl Server {
         }
     }
 
-    fn handle_mset(&mut self, args: &[&[u8]]) -> Result<Value> {
-        if args.len() % 2 != 0 {
+    fn handle_mset(&mut self, argv: &[&[u8]]) -> Result<Value> {
+        if argv.len() % 2 != 0 {
             return Err(TinkvError::resp_wrong_num_of_args("mset"));
         }
 
         let mut i = 0;
         loop {
-            if i + 1 >= args.len() {
+            if i + 1 >= argv.len() {
                 break;
             }
 
-            if let Err(e) = self.store.set(args[i], args[i + 1]) {
+            if let Err(e) = self.store.set(argv[i], argv[i + 1]) {
                 return Err(TinkvError::new_resp_common(
                     "INTERNALERR",
                     &format!("{}", e),
@@ -184,12 +185,12 @@ impl Server {
         Ok(Value::new_simple_string("OK"))
     }
 
-    fn handle_del(&mut self, args: &[&[u8]]) -> Result<Value> {
-        if args.len() != 1 {
+    fn handle_del(&mut self, argv: &[&[u8]]) -> Result<Value> {
+        if argv.len() != 1 {
             return Err(TinkvError::resp_wrong_num_of_args("del"));
         }
 
-        match self.store.remove(args[0]) {
+        match self.store.remove(argv[0]) {
             Ok(()) => Ok(Value::new_simple_string("OK")),
             Err(e) => Err(TinkvError::new_resp_common(
                 "INTERNALERR",
@@ -198,21 +199,21 @@ impl Server {
         }
     }
 
-    fn handle_dbsize(&mut self, args: &[&[u8]]) -> Result<Value> {
-        if !args.is_empty() {
+    fn handle_dbsize(&mut self, argv: &[&[u8]]) -> Result<Value> {
+        if !argv.is_empty() {
             return Err(TinkvError::resp_wrong_num_of_args("dbsize"));
         }
 
         Ok(Value::new_integer(self.store.len() as i64))
     }
 
-    fn handle_exists(&mut self, args: &[&[u8]]) -> Result<Value> {
-        if args.is_empty() {
+    fn handle_exists(&mut self, argv: &[&[u8]]) -> Result<Value> {
+        if argv.is_empty() {
             return Err(TinkvError::resp_wrong_num_of_args("exists"));
         }
 
         let mut exists = 0;
-        for arg in args {
+        for arg in argv {
             if self.store.contains_key(arg) {
                 exists += 1;
             }
@@ -221,10 +222,10 @@ impl Server {
         Ok(Value::new_integer(exists as i64))
     }
 
-    fn handle_keys(&mut self, args: &[&[u8]]) -> Result<Value> {
-        let pattern = match args.len() {
+    fn handle_keys(&mut self, argv: &[&[u8]]) -> Result<Value> {
+        let pattern = match argv.len() {
             0 => glob::Pattern::new("*"),
-            1 => glob::Pattern::new(to_utf8_string(args[0]).as_ref()),
+            1 => glob::Pattern::new(to_utf8_string(argv[0]).as_ref()),
             _ => return Err(TinkvError::resp_wrong_num_of_args("exists")),
         };
 
@@ -240,8 +241,8 @@ impl Server {
         Ok(Value::new_array(keys))
     }
 
-    fn handle_compact(&mut self, args: &[&[u8]]) -> Result<Value> {
-        if !args.is_empty() {
+    fn handle_compact(&mut self, argv: &[&[u8]]) -> Result<Value> {
+        if !argv.is_empty() {
             return Err(TinkvError::resp_wrong_num_of_args("compact"));
         }
 
@@ -254,7 +255,7 @@ impl Server {
         }
     }
 
-    fn handle_info(&mut self, args: &[&[u8]]) -> Result<Value> {
+    fn handle_info(&mut self, argv: &[&[u8]]) -> Result<Value> {
         let server_section = || {
             let mut info = String::new();
             info.push_str("# Server\n");
@@ -304,12 +305,12 @@ impl Server {
 
         let mut info = Vec::new();
 
-        match args.len() {
+        match argv.len() {
             0 => {
                 info.push(server_section());
                 info.push(stats_section());
             }
-            1 => match to_utf8_string(args[0]).to_ascii_lowercase().as_ref() {
+            1 => match to_utf8_string(argv[0]).to_ascii_lowercase().as_ref() {
                 "server" => {
                     info.push(server_section());
                 }
@@ -324,8 +325,8 @@ impl Server {
         Ok(Value::new_bulk_string(info.join("\n").as_bytes().to_vec()))
     }
 
-    fn handle_command(&mut self, args: &[&[u8]]) -> Result<Value> {
-        if !args.is_empty() {
+    fn handle_command(&mut self, argv: &[&[u8]]) -> Result<Value> {
+        if !argv.is_empty() {
             return Err(TinkvError::resp_wrong_num_of_args("command"));
         }
 
@@ -341,17 +342,35 @@ impl Server {
 #[derive(Debug)]
 struct Request {
     name: String,
-    args: Vec<Value>,
+    raw_argv: Vec<Value>,
 }
+
 impl Request {
-    fn args_as_slice(&self) -> Vec<&[u8]> {
+    fn argv(&self) -> Vec<&[u8]> {
         let mut res = vec![];
-        for arg in self.args.iter() {
+        for arg in self.raw_argv.iter() {
             if let Some(v) = arg.as_bulk_string() {
                 res.push(v);
             }
         }
         res
+    }
+}
+
+impl fmt::Display for Request {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut argv_str = vec![];
+        for arg in self.raw_argv.iter() {
+            argv_str.push(format!("{}", arg));
+        }
+
+        write!(
+            f,
+            "Request(name=\"{}\", argc={}, argv={:?})",
+            &self.name,
+            argv_str.len(),
+            argv_str
+        )
     }
 }
 
@@ -367,7 +386,7 @@ impl TryFrom<Value> for Request {
                 let name = to_utf8_string(v.remove(0).as_bulk_string().unwrap());
                 Ok(Self {
                     name: name.to_ascii_lowercase(),
-                    args: v,
+                    raw_argv: v,
                 })
             }
             _ => Err(TinkvError::ParseRespValue),
@@ -388,7 +407,7 @@ where
     }
 
     fn write_value(&mut self, value: Value) -> Result<()> {
-        trace!("send value to client: {:?}", value);
+        trace!("send value to client: {}", value);
         serialize_to_writer(&mut self.writer, &value)?;
         Ok(())
     }

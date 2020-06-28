@@ -2,7 +2,7 @@
 //! Ref: https://redis.io/topics/protocol
 use crate::error::{Result, TinkvError};
 use crate::util::ByteLineReader;
-use log::trace;
+use std::fmt;
 use std::io::{BufRead, Cursor, Write};
 
 macro_rules! repr {
@@ -77,6 +77,26 @@ pub(crate) enum Value {
 impl Default for Value {
     fn default() -> Self {
         Self::NullBulkString
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::SimpleString(s) => write!(f, "SimpleString(\"{}\")", s),
+            Value::Error { name, msg } => write!(f, "Error(\"{} {}\")", name, msg),
+            Value::Integer(i) => write!(f, "Integer({})", i),
+            Value::BulkString(s) => write!(f, "BulkString(\"{}\")", String::from_utf8_lossy(s)),
+            Value::Array(elements) => {
+                let mut output = vec![];
+                for element in elements {
+                    output.push(format!("{}", element));
+                }
+                write!(f, "Array({:?})", output)
+            }
+            Value::NullBulkString => write!(f, "NullBulkString"),
+            Value::NullArray => write!(f, "NullArray"),
+        }
     }
 }
 
@@ -320,7 +340,6 @@ where
     }
 
     fn next_value(&mut self, value_line: &[u8]) -> Result<Value> {
-        trace!("receive value line {}", repr!(value_line));
         let remaining = &value_line[1..];
         match value_line[0] {
             SIMPLE_STR_PREFIX => Ok(Value::simple_string_from_slice(remaining)),
@@ -501,7 +520,6 @@ where
     }
 
     fn write(&mut self, value: &[u8]) -> Result<()> {
-        trace!("serializer writes: `{}`", repr!(value));
         self.writer.write_all(value)?;
         Ok(())
     }
