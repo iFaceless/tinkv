@@ -8,6 +8,7 @@ use crate::resp::{deserialize_from_reader, serialize_to_writer, Value};
 use lazy_static::lazy_static;
 use log::{debug, info, trace};
 
+use crate::util::to_utf8_string;
 use std::convert::TryFrom;
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter};
@@ -15,7 +16,7 @@ use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 
 lazy_static! {
     static ref COMMANDS: Vec<&'static str> = vec![
-        "ping", "get", "mget", "set", "mset", "del", "dbsize", "exists", "compact", "info",
+        "ping", "get", "mget", "set", "mset", "del", "dbsize", "exists", "keys", "compact", "info",
         "command",
     ];
 }
@@ -90,6 +91,7 @@ impl Server {
             "del" => send!(self.handle_del(&args)),
             "dbsize" => send!(self.handle_dbsize(&args)),
             "exists" => send!(self.handle_exists(&args)),
+            "keys" => send!(self.handle_keys(&args)),
             "compact" => send!(self.handle_compact(&args)),
             "info" => send!(self.handle_info(&args)),
             "command" => send!(self.handle_command(&args)),
@@ -219,6 +221,25 @@ impl Server {
         Ok(Value::new_integer(exists as i64))
     }
 
+    fn handle_keys(&mut self, args: &[&[u8]]) -> Result<Value> {
+        let pattern = match args.len() {
+            0 => glob::Pattern::new("*"),
+            1 => glob::Pattern::new(to_utf8_string(args[0]).as_ref()),
+            _ => return Err(TinkvError::resp_wrong_num_of_args("exists")),
+        };
+
+        let mut keys = vec![];
+
+        let pattern = pattern.map_err(|e| TinkvError::new_resp_common("ERR", &format!("{}", e)))?;
+        for key in self.store.keys() {
+            if pattern.matches(to_utf8_string(key).as_ref()) {
+                keys.push(Value::new_bulk_string(key.to_vec()));
+            };
+        }
+
+        Ok(Value::new_array(keys))
+    }
+
     fn handle_compact(&mut self, args: &[&[u8]]) -> Result<Value> {
         if !args.is_empty() {
             return Err(TinkvError::resp_wrong_num_of_args("compact"));
@@ -288,10 +309,7 @@ impl Server {
                 info.push(server_section());
                 info.push(stats_section());
             }
-            1 => match String::from_utf8_lossy(args[0])
-                .to_ascii_lowercase()
-                .as_ref()
-            {
+            1 => match to_utf8_string(args[0]).to_ascii_lowercase().as_ref() {
                 "server" => {
                     info.push(server_section());
                 }
@@ -346,8 +364,7 @@ impl TryFrom<Value> for Request {
                 if v.is_empty() {
                     return Err(TinkvError::ParseRespValue);
                 }
-                let name =
-                    String::from_utf8_lossy(v.remove(0).as_bulk_string().unwrap()).to_string();
+                let name = to_utf8_string(v.remove(0).as_bulk_string().unwrap());
                 Ok(Self {
                     name: name.to_ascii_lowercase(),
                     args: v,
