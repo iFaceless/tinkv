@@ -179,6 +179,7 @@ $ tinkv /tmp/db -vvv compact
 - `info [<section>]`
 - `command`
 - `dbsize`
+- `flushdb/flushall`
 - `compact`: extended command to trigger a compaction manually.
 
 Key/value pairs are persisted in log files under directory `/urs/local/var/tinkv`. The default listening address of server is `127.0.0.1:7379`, and you can connect to it with a redis client.

@@ -7,6 +7,7 @@ use log::{debug, info, trace};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::fs::create_dir_all;
+use std::time;
 
 use std::path::{Path, PathBuf};
 
@@ -74,6 +75,8 @@ impl Store {
     }
 
     fn build_keydir(&mut self) -> Result<()> {
+        let begin_at = time::Instant::now();
+
         // TODO: build keydir from index file.
         // fallback to the original data file to rebuild keydir.
         let mut file_ids = self.data_files.keys().cloned().collect::<Vec<_>>();
@@ -91,8 +94,11 @@ impl Store {
         // update stats.
         self.stats.total_active_entries = self.keydir.len() as u64;
 
+        let duration = time::Instant::now().duration_since(begin_at);
+
         info!(
-            "build keydir done, got {} keys. current stats: {:?}",
+            "build keydir in {:?}, got {} keys. current stats: {:?}",
+            duration,
             self.keydir.len(),
             self.stats
         );
@@ -289,6 +295,8 @@ impl Store {
 
     /// Clear stale entries from data files and reclaim disk space.
     pub fn compact(&mut self) -> Result<()> {
+        let begin_at = time::Instant::now();
+
         info!(
             "there are {} data files need to be compacted",
             self.data_files.len()
@@ -396,6 +404,11 @@ impl Store {
 
         self.data_files.retain(|&k, _| k > next_file_id);
         debug!("cleaned {} stale segments", stale_segment_count);
+
+        info!(
+            "compaction progress done in {:?}",
+            time::Instant::now().duration_since(begin_at)
+        );
 
         // update stats.
         self.stats.total_data_files = self.data_files.len() as u64;

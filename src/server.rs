@@ -6,7 +6,7 @@ use crate::store::Store;
 
 use crate::resp::{deserialize_from_reader, serialize_to_writer, Value};
 use lazy_static::lazy_static;
-use log::{debug, info, trace};
+use log::{debug, error, info, trace};
 
 use crate::util::to_utf8_string;
 use std::convert::TryFrom;
@@ -17,8 +17,8 @@ use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 
 lazy_static! {
     static ref COMMANDS: Vec<&'static str> = vec![
-        "ping", "get", "mget", "set", "mset", "del", "dbsize", "exists", "keys", "compact", "info",
-        "command",
+        "ping", "get", "mget", "set", "mset", "del", "dbsize", "exists", "keys", "flushdb",
+        "flushall", "compact", "info", "command",
     ];
 }
 
@@ -37,7 +37,14 @@ impl Server {
         info!("TinKV server is listening at '{}'", addr);
         let listener = TcpListener::bind(addr)?;
         for stream in listener.incoming() {
-            self.serve(stream?)?;
+            match stream {
+                Ok(stream) => {
+                    if let Err(e) = self.serve(stream) {
+                        error!("{}", e);
+                    }
+                }
+                Err(e) => error!("{}", e),
+            }
         }
         Ok(())
     }
@@ -93,6 +100,7 @@ impl Server {
             "dbsize" => send!(self.handle_dbsize(&argv)),
             "exists" => send!(self.handle_exists(&argv)),
             "keys" => send!(self.handle_keys(&argv)),
+            "flushall" | "flushdb" => send!(self.handle_flush(req.name.as_ref(), &argv)),
             "compact" => send!(self.handle_compact(&argv)),
             "info" => send!(self.handle_info(&argv)),
             "command" => send!(self.handle_command(&argv)),
@@ -239,6 +247,27 @@ impl Server {
         }
 
         Ok(Value::new_array(keys))
+    }
+
+    fn handle_flush(&mut self, cmd: &str, argv: &[&[u8]]) -> Result<Value> {
+        if !argv.is_empty() {
+            return Err(TinkvError::resp_wrong_num_of_args(cmd));
+        }
+
+        // too stupid, just in order to pass borrow checking.
+        // FIXME: find a better way to implement this feature?
+        let mut keys = vec![];
+        for key in self.store.keys() {
+            keys.push(key.clone());
+        }
+
+        for key in keys.iter() {
+            self.store
+                .remove(key.as_ref())
+                .map_err(|e| TinkvError::new_resp_common("INTERNALERR", &format!("{}", e)))?;
+        }
+
+        Ok(Value::new_simple_string("OK"))
     }
 
     fn handle_compact(&mut self, argv: &[&[u8]]) -> Result<Value> {
