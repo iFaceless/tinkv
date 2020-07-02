@@ -304,6 +304,11 @@ Found another simple key-value database based on Bitcask model, please refer [xu
 - [Idiomatic callbacks in Rust](https://stackoverflow.com/questions/41081240/idiomatic-callbacks-in-rust)
 - [What are reasonable ways to store a callback in a struct?](https://users.rust-lang.org/t/what-are-reasonable-ways-to-store-a-callback-in-a-struct/5810)
 - [Things Rust doesn’t let you do](https://medium.com/@GolDDranks/things-rust-doesnt-let-you-do-draft-f596a3c740a5)
+- [Lock-free Rust: Crossbeam in 2019](https://stjepang.github.io/2019/01/29/lock-free-rust-crossbeam-in-2019.html)
+- [Exploring lock-free Rust 3: Crossbeam](https://morestina.net/blog/784/exploring-lock-free-rust-3-crossbeam)
+- [Implementation of `evmap`](https://docs.rs/evmap/10.0.2/evmap/#implementation)
+- [无锁数据结构：简介](https://kb.cnblogs.com/page/529154/)
+- [Lock-free Data Structures. 1 — Introduction](http://kukuruku.co/hub/cpp/lock-free-data-structures-introduction)
 
 # License
 
