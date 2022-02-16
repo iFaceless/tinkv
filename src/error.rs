@@ -1,6 +1,6 @@
 use std::io;
 use std::num::ParseIntError;
-use std::path::PathBuf;
+use std::path::{Display, PathBuf};
 use thiserror::Error;
 
 /// The result of any operation.

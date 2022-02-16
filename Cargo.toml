@@ -42,6 +42,8 @@ bytefmt = '0.1.7'
 lazy_static = '1.4.0'
 os_info = '2.0.6'
 sys-info = '0.7.0'
+env_logger = "0.9.0"
+chrono = "0.4.19"
 
 [dependencies.serde]
 version = '1.0.111'

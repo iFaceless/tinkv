@@ -67,6 +67,7 @@ impl Server {
 
     fn handle_request<W: Write>(&mut self, conn: &mut Conn<W>, req: Request) -> Result<()> {
         trace!("handle {}", &req);
+
         let argv = req.argv();
 
         macro_rules! send {
